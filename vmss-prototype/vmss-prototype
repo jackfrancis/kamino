@@ -1,0 +1,1059 @@
+#!/usr/bin/env python
+# PYTHON_ARGCOMPLETE_OK
+# The token above is necessary for Python auto-complete trigger. The auto-complete bash
+# extension is installed via configure-dev-box. If you want to do this manually, run the
+# following line after installing argcomplete pip module:
+# activate-global-python-argcomplete --user
+# pylint: disable=line-too-long
+
+import argparse
+import datetime
+import json
+import logging
+import os
+import re
+import shlex
+import subprocess
+import sys
+import time
+
+import argcomplete # type: ignore
+
+
+def fatal_error(msg):
+    """
+    Fail this process with the given message flushed to stderr
+    :param msg: Message to be output
+    :return: None
+    """
+    logging.error(msg)
+    sys.stderr.write('{0}\n'.format(msg))
+    sys.stderr.flush()
+    sys.exit(-1)
+
+
+def masq_text(text, masq=None):
+    """
+    Masquerade any secrets in the given text
+    :param text: Text to masq out secrets
+    :param masq: List of strings to masquerade from the output log (useful for secrets)
+    :return: The text string after masquerading secrets
+    """
+    if masq is not None:
+        for m in masq:
+            text = str(text).replace(m.decode() if isinstance(m, bytes) else m, '********')
+
+    return text
+
+
+def masq_cmd(command, masq=None):
+    """
+    Build a text version of the given command that masquerades any secrets as needed
+    :param command: Command to masq, either as a string or list of types that are convertible to string
+    :param masq: List of strings to masquerade from the command output log (useful for secrets)
+    :return: The text string of the command after masquerading secrets
+    """
+    # Note that subprocess.list2cmdline does not handle this correctly
+    # Specifically, it messes up certain json query options.  This is why
+    # I use this construct to do it which leaves more quotes than needed but
+    # at least does not mess up the quotes where needed.
+    return str(masq_text(command, masq=masq) if not isinstance(command, list) else re.sub(r'([\'"]), ([\'"])', '\\1 \\2', str([masq_text(arg, masq=masq) for arg in command])))
+
+
+def log_cmd(command, show_cmd=True, masq=None, dry_run=False, comment=None, duration=None):
+    """
+    Log the given command as the command we are about to execute
+    :param command: Command to log, either as a string or list of types that are convertible to string
+    :param show_cmd: Show the command line that is about to be executed (on stderr)
+    :param masq: List of strings to masquerade from the command output log (useful for secrets)
+    :param dry_run: Just echo the command, don't run it
+    :return:
+    """
+    text = "===> {0}: {1}{2}".format('Dry run command' if dry_run else 'Executing command' if duration is None else 'Completed in {0:.2f}s'.format(duration),
+                                     masq_cmd(command, masq=masq),
+                                     '' if comment is None else ' # {0}'.format(comment))
+    if show_cmd:
+        logging.info(text)
+    else:
+        logging.debug(text)
+
+
+def log_stdout_stderr(stdout, stderr, exit_code, masq=None):
+    """
+    Log the stdout, stderr, and exit_code, applying the masq as needed
+    :param stdout: The stdout from a command that ran
+    :param stderr: The stderr from a command that ran
+    :param exit_code: The exit code (number) of a command that ran
+    :param masq: List of strings to masquerade from the command output log (useful for secrets)
+    :return:
+    """
+    log_func = lambda s: logging.warning(s) if exit_code != 0 else logging.info(s)
+    if stdout.strip(' \t\n\r') != "":
+        for line in stdout.splitlines():
+            log_func("STDOUT: {0}".format(masq_text(line, masq)))
+    if stderr.strip(' \t\n\r') != "":
+        for line in stderr.splitlines():
+            log_func("STDERR: {0}".format(masq_text(line, masq)))
+    log_func("EXIT CODE: {0}".format(exit_code))
+
+
+def run(command, timeout=None, env=None, shell=False, check=True, quiet=False, dry_run=False, show_cmd=True, cwd=None,
+        echo=False, masq=None, stdin='', comment=None, log_timing=False, log_stdout_on_error=True, log_stderr_on_error=True,
+        retries=1, retry_wait_duration_func=lambda num_retry: 2 ** (num_retry + 2), log_final_error=False, log_retry_errors=False,
+        retry_func=lambda stdout, stderr, exit_code: True):
+    """
+    Run the given command in the shell
+    :param command: Command to execute, either as a string or list of types that are convertible to string
+    :param timeout: Timeout, in seconds, to wait for command to finish
+    :param env: Environment to use when running the command
+    :param shell: Whether to use shell directly or not. Setting this to True is VERY dangerous, please know what you
+                  are doing. The default shell is sh on Linux. However, this may be the only way to make the commands
+                  with pipes work as single-shot commands.
+    :param check: Throws if the error code returned is not 0
+    :param quiet: Redirects all output to /dev/null
+    :param dry_run: Just echo the command, don't run it
+    :param show_cmd: Show the command line that is about to be executed (on stderr)
+    :param cwd: working directory for Popen
+    :param echo: Show output of the command before returning it to the caller
+    :param masq: List of strings to masquerade from the command output log (useful for secrets)
+    :param stdin: A string of data to be passed to stdin of the process - defaults to nothing
+    :param comment: An optional comment to be logged with the command line
+    :param log_timing: If true, logs the execution time of the command in addition to the command
+    :param log_stdout_on_error: If true (default), on error, the stdout of the command is logged
+    :param log_stderr_on_error: If true (default), on error, the stderr of the command is logged
+    :param retries: Number of retries before giving up due to errors
+    :param retry_wait_duration_func: A function to get the wait in seconds for a particular retry attempt. Default delay is exponential backoff with initial delay of 8 seconds
+    :param log_final_error: Log the final retry error even if check==False
+    :param log_retry_errors: Log the errors for retries
+    :param retry_func: Function to call after an error.   Passed in 3-tuple (stdin, stdout, exit_code), return is if retry should happen (False if no retry)
+    :return: 3-tuple (stdout as string, stderr as string and exit code as int)
+    """
+    stdout = ""
+    stderr = ""
+    exit_code = 0
+    cmd = None
+
+    # If command is string, shlex it properly for bash. If it's already a list, just make sure all elements are str.
+    # Also properly handle shell argument for each variant.
+    if isinstance(command, str):
+        if shell:
+            cmd = command
+        else:
+            cmd = shlex.split(command)
+            if len(cmd) > 1:
+                logging.info('NOTE:  Use an argument vector rather than a simple string')
+
+    elif isinstance(command, list):
+        cmd = [arg.decode('ascii') if isinstance(arg, bytes) else str(arg) for arg in command]
+    else:
+        fatal_error("The command must be either list or string")
+
+    # Echo the command in the form we would try to execute it
+    # This includes the above optional addition of splitting operations
+    # We do a bit of formatting such that the command display is a bit nicer and
+    # can be more likely cut-n-paste to execute it
+    log_cmd(cmd, show_cmd=show_cmd, masq=masq, dry_run=dry_run, comment=comment)
+
+    # If dry run is specified, simply return after echo
+    if dry_run:
+        return stdout, stderr, exit_code
+
+    # If in the quiet mode, redirect all output to null; otherwise pipe so we can capture it
+    if quiet:
+        output = open(os.devnull, "w")
+    else:
+        output = subprocess.PIPE
+
+    start_time = time.time()
+    num_retry = 1
+    while True:
+        # clear variables
+        exit_code = -100
+        stdout = ""
+        stderr = ""
+
+        retry_start_time = time.time()
+
+        # Open a process so that we can communicate with it
+        p = subprocess.Popen(cmd, shell=shell, cwd=cwd, stdin=subprocess.PIPE, stdout=output, stderr=output, env=env)
+
+        try:
+            stdout, stderr = p.communicate(timeout=timeout, input=stdin if isinstance(stdin, bytes) else str(stdin).encode())
+            exit_code = p.returncode
+        except subprocess.TimeoutExpired:
+            stderr += "\nERROR: TIMEOUT"
+            p.terminate()
+            exit_code = -99
+
+        # Under certain error conditions, stdout/stderr are not bytes
+        # so we need to handle that here.  (Mainly under timeout conditions)
+        if isinstance(stdout, bytes):
+            stdout = stdout.decode('utf-8')
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode('utf-8')
+
+        if exit_code == 0:
+            break
+
+        # If we are to log "retry" errors, do that here before we talk about the retry
+        if log_retry_errors:
+            retry_duration = time.time() - retry_start_time
+            done_comment = 'RC={0}  try #{1}'.format(exit_code, num_retry)
+            if comment is not None:
+                done_comment = '{0} : {1}'.format(comment, done_comment)
+            log_cmd(cmd, show_cmd=show_cmd, masq=masq, dry_run=dry_run, comment=done_comment, duration=retry_duration)
+            log_stdout_stderr(stdout if log_stdout_on_error else '', stderr if log_stderr_on_error else '', exit_code, masq=masq)
+
+        if num_retry >= retries:
+            break
+
+        if not retry_func(stdout, stderr, exit_code):
+            break
+
+        retry_delay = retry_wait_duration_func(num_retry)
+        logging.warning("Attempt {0}: Command failed with exit code {1}.  Retrying in {2}s ...".format(num_retry, 'TIMEOUT (-99)' if exit_code == -99 else 'UNKNOWN_FAULT (-100)' if exit_code == -100 else exit_code, retry_delay))
+
+        time.sleep(retry_delay)
+        num_retry += 1
+
+        # Log the retry of the command...
+        log_cmd(cmd, show_cmd=show_cmd, masq=masq, dry_run=dry_run, comment='{0} ... try #{1}'.format(comment if comment is not None else '', num_retry))
+
+    duration = time.time() - start_time
+    if log_timing:
+        done_comment = 'RC={0}'.format(exit_code)
+        if comment is not None:
+            done_comment = '{0} : {1}'.format(comment, done_comment)
+        log_cmd(cmd, show_cmd=show_cmd, masq=masq, dry_run=dry_run, comment=done_comment, duration=duration)
+
+    # If check is on, throw on non-zero exit code (emulate check_call behavior, but with fast fail)
+    # Note that we must masq the output too as sometimes secrets can show up in the output
+    if (exit_code != 0 and (check or log_final_error) and not log_retry_errors) or echo:
+        log_stdout_stderr(stdout if log_stdout_on_error else '', stderr if log_stderr_on_error else '', exit_code, masq=masq)
+
+    if exit_code != 0 and check:
+        fatal_error("Unexpected exit code {0} from child process: {1}".format(exit_code, masq_cmd(cmd, masq=masq)))
+
+    return stdout, stderr, exit_code
+
+
+def get_nodes():
+    """
+    Get a list of nodes in the current cluster
+    :return: A list of nodes
+    """
+    nodes, _, _ = run(['kubectl', 'get', 'nodes',
+                       '--output', 'jsonpath={.items[*].metadata.name}'
+                       ], retries=3)
+    return nodes.split()
+
+
+def get_vmss_set():
+    """
+    Get the sorted list of VMSS that could be set to run prototype model
+    :return: A set of valid VMSS for this cluster that could run prototype model
+    """
+    # The set of VMSS in the cluster
+    return sorted({re.sub(r'-vmss[0-9a-z]{6}$', r'-vmss', node) for node in get_nodes() if '-vmss' in node})
+
+
+def get_vmss_sig(cluster_name):
+    """
+    Return the name of the SIG for a given cluster name
+    :param cluster_name: The name of the cluster
+    :return: The name of the SIG for that cluster
+    """
+    # SIG names can not have "-" but can have "_"
+    return 'SIG_{0}'.format(cluster_name.replace('-','_'))
+
+
+def get_sig_image_def(vmss_name):
+    """
+    Generate the SIG image definition name for the given VMSS name
+    :param vmss_name:  The name of the VMSS we are looking for
+    :return:  Name of the SIG image definiton
+    """
+    return 'Skyman-{0}-prototype'.format(vmss_name)
+
+
+def convert_os_patch_datetime(patch_time):
+    """
+    Convert a rebooter OS patched applied time string
+    to a datetime object
+    We depend on the format to be parsed as '%Y-%m-%dT%H:%M:%S+00:00'
+    :param patch_time:  The rebooter generated time string
+    :return: Datetime object (or exception if failed to parse)
+    """
+    return datetime.datetime.strptime(patch_time, '%Y-%m-%dT%H:%M:%S+00:00')
+
+
+def lookup_one_value(value_dict, value_arg):
+    """
+    Look up a value from a nested dictionary given the dotted string as the key
+    :param value_dict: The dictionary to look into
+    :param value_arg: The dotted string to look up in the dict
+    :return: The value or None if not found
+    """
+    value = value_dict
+    for part in value_arg.split("."):
+        if value:
+            try:
+                value = value[part]
+            except:
+                value = None
+    return value
+
+
+def vmss_prototype_collect_status(sub_args):
+    """
+    Gather information about VMSS Prototype deployment in the cluster
+    :param sub_args:  Command line arguments
+    :return: generator of status information lines
+    """
+    subscription = sub_args.subscription
+    resource_group = sub_args.resource_group
+    sig_name = get_vmss_sig(sub_args.name)
+
+    _, _, rc = run(['az', 'sig', 'show',
+                    '--subscription', subscription,
+                    '--resource-group', resource_group,
+                    '--gallery-name', sig_name
+                    ], retries=3, check=False, retry_func=lambda stdout, stderr, exit_code: 'not found' not in stderr)
+    if rc != 0:
+        yield '{0}: No Skyman VMSS Prototype Shared Image Gallery for cluster'.format(sub_args.name)
+        return
+
+    for vmss in get_vmss_set():
+        # The VMSS specific image definition name
+        image_definition = get_sig_image_def(vmss)
+
+        output, _, rc = run(['az', 'sig', 'image-definition', 'show',
+                             '--subscription', subscription,
+                             '--resource-group', resource_group,
+                             '--gallery-name', sig_name,
+                             '--gallery-image-definition', image_definition
+                             ], retries=3, check=False, retry_func=lambda stdout, stderr, exit_code: 'not found' not in stderr)
+        if rc != 0:
+            yield '{0}: {1}: No Skyman VMSS Prototype Image Definition'.format(sub_args.name, vmss)
+            continue
+
+        image_def = json.loads(output)
+
+        output, _, rc = run(['az', 'sig', 'image-version', 'list',
+                             '--subscription', subscription,
+                             '--resource-group', resource_group,
+                             '--gallery-name', sig_name,
+                             '--gallery-image-definition', image_definition
+                             ], retries=3, check=False)
+        if rc != 0:
+            yield '{0}: {1}: Failed to get Skyman VMSS Prototype Image Definition Versions'.format(sub_args.name, vmss)
+            continue
+
+        versions = json.loads(output)
+        if len(versions) < 1:
+            yield '{0}: {1}: No Skyman VMSS Prototype Image Definition Versions'.format(sub_args.name, vmss)
+            continue
+
+        output, _, _ = run(['az', 'vmss', 'show',
+                            '--subscription', subscription,
+                            '--resource-group', resource_group,
+                            '--name', vmss
+                            ], retries=3)
+        vmss_info = json.loads(output)
+
+        versions.sort(key=lambda image: image['name'])
+        for version in reversed(versions):
+            yield '{0}: {1}: VMSS Prototype Image Version {2} - {3} - BuiltFrom: {4} @ {5}'.format(
+                sub_args.name,
+                vmss,
+                lookup_one_value(version, 'name'),
+                lookup_one_value(version, 'provisioningState'),
+                lookup_one_value(version, 'tags.BuiltFrom'),
+                lookup_one_value(version, 'tags.BuiltAt')
+                )
+
+        image_ref = lookup_one_value(vmss_info, 'virtualMachineProfile.storageProfile.imageReference.id')
+        found = False
+        if image_ref == image_def['id']:
+            yield '{0}: {1}: Configured to use latest VMSS Prototype Image Definition'.format(sub_args.name, vmss)
+            found = True
+        else:
+            for version in versions:
+                if image_ref == version['id']:
+                    yield '{0}: {1}: Configured to use VMSS Prototype Image Version {2}'.format(sub_args.name, vmss, version['name'])
+                    found = True
+
+        if not found:
+            yield '{0}: {1}: Not configured to use VMSS Prototype Image'.format(sub_args.name, vmss)
+
+
+def vmss_prototype_status(sub_args):
+    """
+    Display information about the VMSS prototype settings
+    :param sub_args:  Command line arguments
+    :return:
+    """
+    # Gather the results and then print them
+    results = list(vmss_prototype_collect_status(sub_args))
+    print('VMSS Prototype Status for cluster {0}:'.format(sub_args.name))
+    for result in results:
+        print(result)
+
+
+def vmss_build_sig_image(subscription, resource_group, sig_name, image_definition, version, snapshot):
+    """
+    Try to build a SIG image version - default is ZRS unless that
+    does not work, in which case it will fall back to LRS storage
+    :param subscription:  The subscription the resource group is in
+    :param resource_group:  The resource group of the sig
+    :param sig_name:  The name of the sig
+    :param image_definition:  The inmage definition name
+    :param version:  The version we will be creating
+    :param snapshot:  The snapshow we will be creating from
+    :return:  The output yaml (as text) of the version we created
+    """
+    # create command without the storage account type included
+    create_cmd = ['az', 'sig', 'image-version', 'create',
+                  '--subscription', subscription,
+                  '--resource-group', resource_group,
+                  '--gallery-name', sig_name,
+                  '--gallery-image-definition', image_definition,
+                  '--gallery-image-version', version,
+                  # See https://docs.microsoft.com/en-us/azure/virtual-machines/windows/shared-image-galleries#scaling
+                  '--replica-count', 3,
+                  '--os-snapshot', snapshot['name'],
+                  '--tags',
+                     'BuiltFrom={0}'.format(snapshot['tags']['BuiltFrom']),
+                     'BuiltAt={0}'.format(snapshot['tags']['BuiltAt'])
+                  ]
+
+    # Start with ZRS - if it fails, we try again with LRS
+    # In regions/data centers where ZRS is not yet supported, this may take a
+    # while to fail.  It seems there is no good way to be sure (other than
+    # knowing somewhere) if ZRS would work.  The best answer is to try and
+    # if it fails, we will fall back to LRS
+    # The good thing is that once ZRS is available in a region, the next
+    # image version created will be via ZRS.  The bad thing is that it takes
+    # a few minutes to notice that ZRS does not work and that we have to do
+    # the LRS fallback.  Given that creating an image can take an hour anyway,
+    # this extra overhead is barely noticed and it is better to be automaticly
+    # ZRS enabled than force the user to know the difference
+    logging.info('Creating sig image version - this can take quite a long time...')
+    output, err, rc = run(create_cmd + ['--storage-account-type', 'Standard_ZRS'],
+                          retries=3,
+                          check=False,
+                          log_timing=True,
+                          log_retry_errors=True,
+                          retry_func=lambda stdout, stderr, exit_code: 'detail:ZRS is not supported' not in stderr)
+
+    if rc != 0:
+        if 'detail:ZRS is not supported' not in err:
+            processtools.fatal_error('Could not create image version!')
+
+        # Delete the broken image since we can't change the storage type of an
+        # existing image even if it failed to create - Azure is very strange
+        # here since the image failed to create and yet it still exists as
+        # a failed image and must be deleted first before another attempt can
+        # be made.
+        run(['az', 'sig', 'image-version', 'delete',
+             '--subscription', subscription,
+             '--resource-group', resource_group,
+             '--gallery-name', sig_name,
+             '--gallery-image-definition', image_definition,
+             '--gallery-image-version', version
+             ], check=False, retries=3)
+
+        logging.warning('Creating sig image version with ZRS failed, so now creating without ZRS')
+        logging.info('Creating sig image version - this can take quite a long time...')
+        output, _, _ = run(create_cmd + ['--storage-account-type', 'Standard_LRS'],
+                           retries=3, log_timing=True, log_retry_errors=True)
+
+    return output
+
+
+def vmss_prototype_update(sub_args):
+    """
+    Update (create if not existing) the prototype based images for the
+    auto-scaling VMSS instances in this cluster
+    :param sub_args:  Arguments from command line
+    :return:
+    """
+    subscription = sub_args.subscription
+    resource_group = sub_args.resource_group
+    sig_name = get_vmss_sig(sub_args.name)
+
+    # Check if we have the Shared Image Gallery - if not, create one
+    _, _, rc = run(['az', 'sig', 'show',
+                    '--subscription', subscription,
+                    '--resource-group', resource_group,
+                    '--gallery-name', sig_name
+                    ], retries=3, check=False, retry_func=lambda stdout, stderr, exit_code: 'not found' not in stderr)
+
+    if rc != 0:
+        run(['az', 'sig', 'create',
+             '--subscription', subscription,
+             '--resource-group', resource_group,
+             '--gallery-name', sig_name,
+             '--description', 'Skyman VMSS images'
+             ], retries=3)
+
+    # Pod types we will skip during drain/delete
+    pod_types_to_skip = ['DaemonSet', 'Node']
+
+    # Format for version numbers from timestamps
+    version_format = '%Y.%m.%d'
+
+    # The time format we use in snapshot tags
+    snapshot_time_format = '%Y-%m-%d %H:%M:%S.%f'
+
+    for vmss in get_vmss_set():
+        logging.info('Processing VMSS {0}'.format(vmss))
+
+        # To get a managed image, we need to first create a snapshot from the
+        # VMSS.  This is the name of that snapshot.  We will delete it once
+        # the new image is in place.
+        snapshot_name = 'snapshot_{0}'.format(vmss)
+
+        # Create our version number from the managed image
+        version = datetime.datetime.now().strftime(version_format)
+
+        # The VMSS specific image definition name
+        image_definition = get_sig_image_def(vmss)
+
+        # Now, we need a image-definition for this VMSS
+        output, _, rc = run(['az', 'sig', 'image-definition', 'show',
+                             '--subscription', subscription,
+                             '--resource-group', resource_group,
+                             '--gallery-name', sig_name,
+                             '--gallery-image-definition', image_definition
+                             ], retries=3, check=False, retry_func=lambda stdout, stderr, exit_code: 'not found' not in stderr)
+        if rc != 0:
+            output, _, _ = run(['az', 'sig', 'image-definition', 'create',
+                                '--subscription', subscription,
+                                '--resource-group', resource_group,
+                                '--gallery-name', sig_name,
+                                '--gallery-image-definition', image_definition,
+                                '--publisher', 'Skyman',
+                                '--offer', sub_args.name,
+                                '--sku', vmss,
+                                '--os-type', 'Linux',
+                                '--os-state', 'generalized'
+                                ], retries=3)
+        image_data = json.loads(output)
+
+        # Now lets look at what versions we have have
+        # We will check if we have the version for our target and
+        # set the image_version to point at it.
+        # We also handle bad deployments here by deleting them.
+        # (Note that deployments still in creating state are
+        # special and need to be "ignored" until they complete or fail)
+        rc = 1
+        image_version = None
+        while rc != 0:
+            output, _, rc = run(['az', 'sig', 'image-version', 'list',
+                                 '--subscription', subscription,
+                                 '--resource-group', resource_group,
+                                 '--gallery-name', sig_name,
+                                 '--gallery-image-definition', image_definition
+                                 ], retries=3)
+
+            existing_versions = json.loads(output)
+            existing_versions.sort(key=lambda image: image['name'])
+            for existing_version in existing_versions:
+                if not existing_version['provisioningState'] in ['Creating', 'Succeeded']:
+                    logging.info('Bad provisioning state: {0} - Cleaning up'.format(existing_version['provisioningState']))
+                    run(['az', 'sig', 'image-version', 'delete',
+                         '--subscription', subscription,
+                         '--resource-group', resource_group,
+                         '--gallery-name', sig_name,
+                         '--gallery-image-definition', image_definition,
+                         '--gallery-image-version', existing_version['name']
+                         ], check=False)
+                else:
+                    if existing_version['name'] == version:
+                        image_version = existing_version
+
+        if not image_version:
+            # Check if we have a current snapshot
+            snapshot = None
+            output, _, rc = run(['az', 'snapshot', 'show',
+                                 '--subscription', subscription,
+                                 '--resource-group', resource_group,
+                                 '--name', snapshot_name
+                                 ], retries=3, check=False, retry_func=lambda stdout, stderr, exit_code: 'not found' not in stderr)
+            if rc == 0:
+                # We have a snapshot - we need to now check if it is too old
+                snapshot = json.loads(output)
+                snapshot_date = lookup_one_value(snapshot, 'tags.BuiltAt')
+                snapshot_version = datetime.datetime.strptime(snapshot_date, snapshot_time_format).strftime(version_format)
+
+                if snapshot_version != version:
+                    # Clean up the snapshot as it is too old - we will need to
+                    # make a fresh one.
+                    run(['az', 'snapshot', 'delete',
+                         '--subscription', subscription,
+                         '--resource-group', resource_group,
+                         '--name', snapshot_name
+                         ], retries=3)
+                    snapshot = None
+
+            # If we don't have a snapshot, we need to find if we have a node
+            # from which to make one.  If not, we will end up skipping this VMSS
+            if not snapshot:
+                if vmss in sub_args.target_node:
+                    # Since the user picked the target node, we don't force it to
+                    # be in any specific state - we trust the user.
+                    target_node = sub_args.target_node
+                else:
+                    logging.info('Target node "{0}" not in vmss "{1}"'.format(sub_args.target_node, vmss))
+                    continue
+
+                # Get some details as to this VM instance
+                instance_id = int(target_node[-6:], base=36)
+
+                output, _, _ = run(['az', 'vmss', 'show',
+                                    '--subscription', subscription,
+                                    '--resource-group', resource_group,
+                                    '--name', vmss,
+                                    '--instance-id', instance_id
+                                    ], retries=3)
+                vmss_node_data = json.loads(output)
+                vmss_disk = vmss_node_data['storageProfile']['osDisk']['managedDisk']['id']
+
+                # Stop the cluster from scaling away the node...
+                # The rebooter will reset this for us - be while we are
+                # creating the snapshot it would be bad if the node was deleted!
+                run(['kubectl', 'annotate', 'node',
+                     target_node,
+                     'cluster-autoscaler.kubernetes.io/scale-down-disabled=true',
+                     '--overwrite'
+                     ], retries=3)
+
+                # Gracefully stop workloads on this VM.
+                run(['kubectl', 'cordon',
+                     target_node
+                     ], retries=3)
+
+                try:
+                    #TODO:  Add the injection of some code to the node to be
+                    #       sure we clean up the cache of unused images before
+                    #       we drain.
+
+                    run(['kubectl', 'drain',
+                         '--ignore-daemonsets',
+                         '--delete-local-data',
+                         '--force',
+                         '--grace-period', sub_args.grace_period,
+                         '--timeout', '{0}s'.format(sub_args.grace_period * 3),
+                         target_node
+                         ], check=False, retries=2, timeout=60 + sub_args.grace_period * 9)
+
+                    # Move any none-daemonset (or node) pods off of this node that have not
+                    # drained (they should have drained already but just in case)
+                    pods, _, _ = run(['kubectl', 'get', 'pods',
+                                      '--all-namespaces',
+                                      '--output', 'jsonpath={{range .items[?(@.spec.nodeName=="{0}")]}}{{.metadata.ownerReferences[0].kind}}{{" "}}{{.metadata.namespace}}{{" "}}{{.metadata.name}}{{"\\n"}}{{end}}'.format(target_node)
+                                      ], retries=3)
+
+                    for line in pods.splitlines():
+                        (pod_type, namespace, pod) = line.split(' ')
+                        if pod_type not in pod_types_to_skip:
+                            run(['kubectl', 'delete', 'pod',
+                                 '--force',
+                                 '--namespace', namespace,
+                                 pod
+                                 ], retries=3, check=False)
+
+                    # Stop the VM now (deallocate it such that the disk image can be accessed)
+                    run(['az', 'vmss', 'deallocate',
+                         '--subscription', subscription,
+                         '--resource-group', resource_group,
+                         '--name', vmss,
+                         '--instance-ids', instance_id
+                         ], retries=3)
+
+                    # Snapshot the disk
+                    output, _, _ = run(['az', 'snapshot', 'create',
+                                        '--subscription', subscription,
+                                        '--resource-group', resource_group,
+                                        '--name', snapshot_name,
+                                        '--source', vmss_disk,
+                                        '--tags',
+                                           'BuiltFrom={0}'.format(target_node),
+                                           'BuiltAt={0}'.format(datetime.datetime.now().strftime(snapshot_time_format))
+                                        ], retries=6)
+                    snapshot = json.loads(output)
+
+                    # Start it up again now that we have the snapshot
+                    # We ignore errors here since it is possible that
+                    # someone deleted the VM after the snapshot
+                    run(['az', 'vmss', 'start',
+                         '--subscription', subscription,
+                         '--resource-group', resource_group,
+                         '--name', vmss,
+                         '--instance-ids', instance_id,
+                         '--no-wait'
+                         ], retries=3, check=False)
+
+                finally:
+                    # Let it be a productive member of the cluster again
+                    # We ignore errors here since the VM may no longer exist
+                    # We best-effort uncordon it.
+                    run(['kubectl', 'uncordon',
+                         target_node
+                         ], retries=3, check=False)
+
+            # Build the image version from the snapshow we have
+            output = vmss_build_sig_image(subscription, resource_group, sig_name, image_definition, version, snapshot)
+            image_version = json.loads(output)
+
+            # Clean up the snapshot now that we have fully put it into the
+            # shared image gallery.
+            run(['az', 'snapshot', 'delete',
+                 '--subscription', subscription,
+                 '--resource-group', resource_group,
+                 '--name', snapshot_name
+                 ], retries=3)
+
+        logging.info('Latest image: {0}'.format(image_version['id']))
+
+        # Now, lets clean up extra images (more than last two)
+        output, _, _ = run(['az', 'sig', 'image-version', 'list',
+                            '--subscription', subscription,
+                            '--resource-group', resource_group,
+                            '--gallery-name', sig_name,
+                            '--gallery-image-definition', image_definition
+                            ], retries=3)
+        versions = json.loads(output)
+
+        # Prune versions older than the newest n
+        # First, sort by the version
+        versions.sort(key=lambda image: image['name'])
+        while len(versions) > sub_args.max_history:
+            old_image = versions.pop(0)
+            old_version = old_image['name']
+            logging.info('Pruning old {0} image version {1}'.format(vmss, old_version))
+            # We don't care if it fails as we will catch them next time
+            run(['az', 'sig', 'image-version', 'delete',
+                 '--subscription', subscription,
+                 '--resource-group', resource_group,
+                 '--gallery-name', sig_name,
+                 '--gallery-image-definition', image_definition,
+                 '--gallery-image-version', old_version
+                 ], check=False)
+
+        # We should be able to only need to do this once per VMSS since after
+        # that the VMSS points at our image definition.  This does not take long
+        # and if it matches what was already there, we don't re-apply the
+        # setting.
+        output, _, _ = run(['az', 'vmss', 'show',
+                            '--subscription', subscription,
+                            '--resource-group', resource_group,
+                            '--name', vmss
+                            ], retries=3)
+        vmss_info = json.loads(output)
+        if lookup_one_value(vmss_info, 'virtualMachineProfile.storageProfile.imageReference.id') == image_data['id']:
+            logging.info('VMSS {0} already set up to use prototype image'.format(vmss))
+        else:
+            # When we set up the new image to be from a snapshot, we must
+            # remove references to the public image gallery offer.
+            # We also want to turn off any cloud-config custom data as
+            # the image is already configured as we need.
+            # Amazingly, this command can return failure even if it works
+            # so we can not trust the return result but rather must inspect
+            # the VMSS configuration afterwards to see if it actually
+            # worked.
+            run(['az', 'vmss', 'update',
+                 '--subscription', subscription,
+                 '--resource-group', resource_group,
+                 '--name', vmss,
+                 '--set',
+                   'virtualMachineProfile.storageProfile.imageReference.id={0}'.format(image_data['id']),
+                   'virtualMachineProfile.storageProfile.imageReference.sku=null',
+                   'virtualMachineProfile.storageProfile.imageReference.offer=null',
+                   'virtualMachineProfile.storageProfile.imageReference.publisher=null',
+                   'virtualMachineProfile.storageProfile.imageReference.version=null',
+                   # This puts a no-op customData as the node is already "set" '#cloud-config\n' encoded into base64
+                   'virtualMachineProfile.osProfile.customData=I2Nsb3VkLWNvbmZpZwo=',
+                 ], retries=3, check=False)
+
+            # This is where we again check the vmss to see if the setting actually
+            # took place.  It is sad that we can not trust the above command to
+            # have valid exit codes but actual evidence in the field shows that
+            # it does "succeed" in setting up the settings but signal "failure"
+            output, _, _ = run(['az', 'vmss', 'show',
+                                '--subscription', subscription,
+                                '--resource-group', resource_group,
+                                '--name', vmss
+                                ], retries=3)
+            vmss_info = json.loads(output)
+            if lookup_one_value(vmss_info, 'virtualMachineProfile.storageProfile.imageReference.id') != image_data['id']:
+                logging.warning('VMSS {0} failed to be configured to use prototype iamge'.format(vmss))
+                continue
+
+        # Get the VMSS extensions and see if we can clean them up
+        output, _, _ = run(['az', 'vmss', 'extension', 'list',
+                            '--subscription', subscription,
+                            '--resource-group', resource_group,
+                            '--vmss-name', vmss
+                            ], retries=3)
+        extensions = json.loads(output)
+
+        # Our CSE for temp encryption
+        skyman_cse = 'CustomScriptForLinux'
+        # The aks-engine CSE
+        aks_cse = 'vmssCSE'
+
+        for extension in extensions:
+            # Now that we have a disk image that already has all of our
+            # provisioning bits on it (prototype) we can remove our encryption
+            # extension as it has already configured the OS image to do that.
+            # We can't actually delete the extension due to some other details
+            # but we can change it to not do anything.
+            if extension['name'] == skyman_cse:
+                # If we are still pointing to our extension file, turn it
+                # off by doing a "nop" echo VMSS Prototype Model
+                vmss_no_op_cmd = 'echo VMSS Prototype Model'
+
+                if vmss_no_op_cmd not in str(extension['settings']):
+                    # We also need to give it the right forceUpdateTag
+                    # in order to replace the prior instance rather than
+                    # becoming a new instance.
+                    settings = {
+                        'commandToExecute': vmss_no_op_cmd,
+                        # Note that the forceUpdateTag on our extension when
+                        # listed is the value we need for forceUpgradeTag
+                        # in the settings.  Very unclear why that is the case.
+                        # It always has a value for our CustomScriptForLinux
+                        # extension.
+                        'forceUpgradeTag': extension['forceUpdateTag']
+                    }
+                    run(['az', 'vmss', 'extension', 'set',
+                         '--subscription', subscription,
+                         '--resource-group', resource_group,
+                         '--vmss-name', vmss,
+                         '--name', extension['name'],
+                         '--publisher', extension['publisher'],
+                         '--settings', json.dumps(settings, sort_keys=True, separators=(',',':'))
+                         ], retries=3, check=False)
+
+            # We can try to remove our CustomScriptForLinux extension but
+            # it may not if it is in a cluster that still has it as a required
+            # CSE before other extensions (rather than just before vmssCSE)
+            # We can also remove the vmssCSE that aks-engine uses to configure
+            # the VM into the VMSS as we have already memoized that via the
+            # prototype image mechanism
+            if extension['name'] in [aks_cse, skyman_cse]:
+                run(['az', 'vmss', 'extension', 'delete',
+                     '--subscription', subscription,
+                     '--resource-group', resource_group,
+                     '--vmss-name', vmss,
+                     '--name', extension['name']
+                     ], retries=3, check=False)
+            else:
+                # We have had added our extension as a prerequisite to extensions
+                # that did not need it.  This actually tries to clean that out.
+                # (Fortunately the one that needs this removed can safely do that)
+                provisionAfter = extension.get('provisionAfterExtensions') or []
+                if skyman_cse in provisionAfter:
+                    provisionAfter.remove(skyman_cse)
+                    # Just in case there was some other extension...  (There
+                    # should not be)
+                    extra_cmd = []
+                    if len(provisionAfter) > 0:
+                        extra_cmd = ['--provision-after-extensions'] + provisionAfter
+
+                    # To change the prerequisites, I have to actually change the
+                    # instance name temporarily as there is no Azure CLI mechanism
+                    # to do this otherwise.  So we just move this to a new name
+                    # and then back again.
+                    run(['az', 'vmss', 'extension', 'set',
+                         '--subscription', subscription,
+                         '--resource-group', resource_group,
+                         '--vmss-name', vmss,
+                         '--name', extension['type'] or extension['type1'],
+                         '--extension-instance-name', 'tmp-' + extension['name'],
+                         '--publisher', extension['publisher'],
+                         '--settings', extension['settings'] or '{}',
+                         '--version', extension['typeHandlerVersion']
+                         ] + extra_cmd, retries=3, check=False)
+
+                    run(['az', 'vmss', 'extension', 'set',
+                         '--subscription', subscription,
+                         '--resource-group', resource_group,
+                         '--vmss-name', vmss,
+                         '--name', extension['type'] or extension['type1'],
+                         '--extension-instance-name', extension['name'],
+                         '--publisher', extension['publisher'],
+                         '--settings', extension['settings'] or '{}',
+                         '--version', extension['typeHandlerVersion']
+                         ] + extra_cmd, retries=3, check=False)
+
+    vmss_prototype_status(sub_args)
+
+
+def ClusterName(v):
+    """
+    Cluster Name validation type for argparser ( 1 to 18 characters of A-Z/a-z/0-9/- )
+    :param v: The proposed cluster name
+    :return: The cluster name if it fits within naming constraints
+    """
+    if re.match(r'^[0-9a-zA-Z-]{1,18}$', v) is None:
+        raise argparse.ArgumentTypeError("Cluster names must be 1 to 18 characters of A-Z, a-z, 0-9, or -")
+    return v
+
+
+def SubscriptionId(v):
+    """
+    Subscription ID (guid) validation type for argparser: 3a96ef56-41a9-40a0-b0f3-fb125c2b8798
+    :param v: The proposed subscription ID
+    :return: The subscription ID
+    """
+    if re.match(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$', v) is None:
+        raise argparse.ArgumentTypeError("Subscription IDs must be in the form of a GUID '12345678-1234-1234-1234-1234567890ab'")
+    return v
+
+
+def HistorySize(v):
+    """
+    Ensure that history size is a number and is at least 2
+    :param v: The proposed history size
+    :return: The history size
+    """
+    v = int(v)
+    if v < 2:
+        raise argparse.ArgumentTypeError("Value must not be at least 2")
+    return v
+
+
+def add_command(subparsers, command, func, description=None):
+    """
+    Add a command to the command parsers with the given function
+    and description with the common arguments needed
+    :param subparsers: The subparsers to add the command to
+    :param command: The command text
+    :param func: The function to call for this command
+    :param description: The optional description
+    :return: The parser for the command that was added
+    """
+    parser = subparsers.add_parser(command, description=description, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("-n", "--name", required=True, type=ClusterName,
+                        help="Name of the cluster (required)")
+    parser.add_argument("-g", "--resource-group", required=True,
+                        help="Name of the resource group the cluster is in (required)")
+    # We take a subscription in case the user has access to more than one in the
+    # az cli - since we need to pick the right subscription.  We could talk about
+    # assuming that the correct subscription is already set as default.
+    parser.add_argument("-s", "--subscription", required=True, type=SubscriptionId,
+                        help="The subscription guid (required)")
+    parser.set_defaults(func=func)
+
+    return parser
+
+
+def register_commands(subparser):
+    """
+    Register commands with the parser
+    :param subparser: the sub parser
+    :return: True if the command was added
+    """
+    parser = add_command(subparser, "status", func=vmss_prototype_status,
+                         description='Show status of VMSS Prototype model')
+
+    parser = add_command(subparser, "update", func=vmss_prototype_update,
+                         description='Set up new/updated prototype')
+    parser.add_argument('--target-node', required=True,
+                        help='Target node to use as the prototype source')
+    parser.add_argument('--max-history', default=3, type=HistorySize,
+                        help='Number of entries to keep in history - minimum is 2 - (default: %(default)s)')
+    parser.add_argument('--grace-period', type=int, default=300,
+                        help='Grace period in seconds for drain (default: %(default)s)')
+
+
+def set_better_help(sub_parser):
+    """
+    Setup a better help display for sub-commands
+    :param sub_parser:  The sub-parser that has sub-commands that we wish to improve
+    """
+    choices = [choice for choice in sub_parser.choices]
+    if len(choices) > 0:
+        choices.sort()
+        sub_help='\none of:'
+        width = 0
+        for i in choices:
+            width = max(width, len(i))
+        for i in choices:
+            sub_help += '\n\t{0}'.format(i)
+            description = sub_parser.choices[i].description
+            if description:
+                line = description.find('\n')
+                if line >= 0:
+                    description = description[0:line]
+                sub_help += '  {0}{1}'.format(' '*(width - len(i)), description)
+        sub_parser.dest = sub_help + '\n'
+        sub_parser.container.description = sub_help
+        sub_parser.required = True
+
+        # Look for any nested subparsers
+        for i in choices:
+            try:
+                if sub_parser.choices[i]._subparsers is not None:  # pylint: disable=protected-access
+                    group = sub_parser.choices[i]._subparsers._group_actions  # pylint: disable=protected-access
+                    if len(group) == 1:
+                        set_better_help(group[0])
+            except:
+                pass
+
+
+def main():
+    '''
+    The main entry point that sets up the command line parser, parses the
+    command line, and then runs what the command line produced.
+    '''
+    # Quick logging of the raw command line to scm before anything can use it/fail
+    # This includes the whole command line as at the point this starts (logging is not
+    # available yet, so this goes to stderr)
+    sys.stderr.write('CMD: {0}\n'.format(masq_cmd(sys.argv)))
+
+    # Start building our command line parser objects
+    parser = argparse.ArgumentParser(
+        description="VMSS Prototype Pattern Tool",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="\nexample use: \n\
+  vmss-prototype.py status ...\n\n\
+  More information available here: https://speechwiki.azurewebsites.net/architecture/skyman-vmss-prototype-pattern.html\n\
+    "
+    )
+
+    # Log level settings happen at the global level
+    parser.add_argument('--log-level', choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
+                        default='INFO',
+                        help="Set the logging level (default: %(default)s)")
+
+    parser.add_argument('--log-timestamps', default=False, action='store_true',
+                        help='Include timestamps in the logging output')
+
+    subparser = parser.add_subparsers(title="commands")
+
+    # Register our commands
+    register_commands(subparser)
+
+    set_better_help(subparser)
+
+    # Enable command line auto-complete support
+    argcomplete.autocomplete(parser)
+
+    # Parse the arguments
+    cmd_line_args = parser.parse_args()
+
+    # Set our logging level and output format (with timestamps or simple)
+    logging.basicConfig(level=cmd_line_args.log_level,
+                        format='%(asctime)s\t%(levelname)s: %(message)s' if cmd_line_args.log_timestamps else '%(levelname)s: %(message)s')
+
+    # and call the appropriate function
+    cmd_line_args.func(cmd_line_args)
+
+
+# ======================= Entry point =======================
+if __name__ == "__main__":
+    main()
