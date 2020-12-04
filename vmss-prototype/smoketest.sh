@@ -18,10 +18,10 @@ if [[ ! -z ${KUBECONFIG} ]] &&
    [[ -d ${HOME}/.azure ]]
    then
         docker run --rm -i -t \
-            -v $(which kubectl):/usr/bin/kubectl:ro \
             -u ${UID}:${GID} \
-            -v ${HOME}/.azure:${HOME}/.azure \
-            -v ${KUBECONFIG}:${KUBECONFIG}:ro \
+            --mount type=bind,source=$(which kubectl),target=/usr/bin/kubectl,readonly \
+            --mount type=bind,source=${HOME}/.azure,target=${HOME}/.azure \
+            --mount type=bind,source=${KUBECONFIG},target=${KUBECONFIG},readonly \
             -e USER=${USER} \
             -e HOME=${HOME} \
             -e KUBECONFIG=${KUBECONFIG} \
