@@ -278,7 +278,7 @@ def get_sig_image_def(vmss_name):
     :param vmss_name:  The name of the VMSS we are looking for
     :return:  Name of the SIG image definiton
     """
-    return 'Skyman-{0}-prototype'.format(vmss_name)
+    return 'kamino-{0}-prototype'.format(vmss_name)
 
 
 def convert_os_patch_datetime(patch_time):
@@ -350,7 +350,7 @@ def vmss_prototype_collect_status(sub_args):
                    '--gallery-name', sig_name
                    ], retries=3, check=False, retry_func=not_found_no_retry)
     if rc != 0:
-        yield '{0}: No Skyman VMSS Prototype Shared Image Gallery for cluster'.format(sub_args.name)
+        yield '{0}: No Kamino VMSS Prototype Shared Image Gallery for cluster'.format(sub_args.name)
         return
 
     for vmss in get_vmss_set():
@@ -363,7 +363,7 @@ def vmss_prototype_collect_status(sub_args):
                             '--gallery-image-definition', image_definition
                             ], retries=3, check=False, retry_func=not_found_no_retry)
         if rc != 0:
-            yield '{0}: {1}: No Skyman VMSS Prototype Image Definition'.format(sub_args.name, vmss)
+            yield '{0}: {1}: No Kamino VMSS Prototype Image Definition'.format(sub_args.name, vmss)
             continue
 
         image_def = json.loads(output)
@@ -374,12 +374,12 @@ def vmss_prototype_collect_status(sub_args):
                             '--gallery-image-definition', image_definition
                             ], retries=3, check=False, retry_func=not_found_no_retry)
         if rc != 0:
-            yield '{0}: {1}: Failed to get Skyman VMSS Prototype Image Definition Versions'.format(sub_args.name, vmss)
+            yield '{0}: {1}: Failed to get Kamino VMSS Prototype Image Definition Versions'.format(sub_args.name, vmss)
             continue
 
         versions = json.loads(output)
         if len(versions) < 1:
-            yield '{0}: {1}: No Skyman VMSS Prototype Image Definition Versions'.format(sub_args.name, vmss)
+            yield '{0}: {1}: No Kamino VMSS Prototype Image Definition Versions'.format(sub_args.name, vmss)
             continue
 
         output, _, _ = run(az(['vmss', 'show'], subscription) + [
@@ -525,7 +525,7 @@ def vmss_prototype_update(sub_args):
         run(az(['sig', 'create'], subscription) + [
             '--resource-group', resource_group,
             '--gallery-name', sig_name,
-            '--description', 'Skyman VMSS images'
+            '--description', 'Kamino VMSS images'
             ], retries=3)
 
     # Pod types we will skip during drain/delete
