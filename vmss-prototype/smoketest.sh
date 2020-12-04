@@ -13,6 +13,7 @@ docker run --rm -i -t ${IMAGE_TAG} --help
 # When run in the cluster, other mechanisms would be used
 if [[ ! -z ${KUBECONFIG} ]] &&
    [[ ! -z ${CLUSTER_NAME} ]] &&
+   [[ ! -z ${RESOURCE_GROUP} ]] &&
    [[ ! -z ${AZ_SUB} ]] &&
    [[ -f ${KUBECONFIG} ]] &&
    [[ -d ${HOME}/.azure ]]
@@ -28,6 +29,6 @@ if [[ ! -z ${KUBECONFIG} ]] &&
             ${IMAGE_TAG} \
             status \
                 --name ${CLUSTER_NAME} \
-                --resource-group SCM__${CLUSTER_NAME} \
+                --resource-group ${RESOURCE_GROUP} \
                 --subscription ${AZ_SUB}
 fi
