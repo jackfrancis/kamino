@@ -829,8 +829,8 @@ def ClusterName(v):
     :param v: The proposed cluster name
     :return: The cluster name if it fits within naming constraints
     """
-    if re.match(r'^[0-9a-zA-Z-]{1,18}$', v) is None:
-        raise argparse.ArgumentTypeError("Cluster names must be 1 to 18 characters of A-Z, a-z, 0-9, or -")
+    if re.match(r'^[0-9a-zA-Z-]+$', v) is None:
+        raise argparse.ArgumentTypeError("Cluster names must consist of characters A-Z, a-z, 0-9, or -")
     return v
 
 
