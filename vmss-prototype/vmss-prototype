@@ -23,7 +23,7 @@ def fatal_error(msg):
     :param msg: Message to be output
     :return: None
     """
-    logging.error(msg)
+    logging.critical(msg)
     sys.stderr.write('{0}\n'.format(msg))
     sys.stderr.flush()
     sys.exit(-1)
@@ -36,11 +36,11 @@ def masq_text(text, masq=None):
     :param masq: List of strings to masquerade from the output log (useful for secrets)
     :return: The text string after masquerading secrets
     """
-    masq_text = str(text)
+    m_text = str(text)
     if masq is not None:
         for masq_item in masq:
-            masq_text = masq_text.replace(masq_item.decode() if isinstance(masq_item, bytes) else masq_item, '***')
-    return masq_text
+            m_text = m_text.replace(masq_item.decode() if isinstance(masq_item, bytes) else masq_item, '***')
+    return m_text
 
 
 def masq_cmd(command, masq=None):
@@ -262,14 +262,16 @@ def get_vmss_set():
     return sorted({node_to_vmss(node) for node in get_nodes() if is_vmss_node(node)})
 
 
-def get_vmss_sig(cluster_name):
+def get_vmss_sig(name):
     """
-    Return the name of the SIG for a given cluster name
-    :param cluster_name: The name of the cluster
+    Return the name of the SIG for a given unique name (usually the resource group name)
+    :param name: The unique name, usually of the resource group
     :return: The name of the SIG for that cluster
     """
     # SIG names can not have "-" but can have "_"
-    return 'SIG_{0}'.format(cluster_name.replace('-','_'))
+    # SIG names also must be unique across the subscription even if
+    # they are within different resource groups!
+    return 'SIG_{0}'.format(name.replace('-','_'))
 
 
 def get_sig_image_def(vmss_name):
@@ -343,14 +345,14 @@ def vmss_prototype_collect_status(sub_args):
     """
     subscription = sub_args.subscription
     resource_group = sub_args.resource_group
-    sig_name = get_vmss_sig(sub_args.name)
+    sig_name = get_vmss_sig(resource_group)
 
     _, _, rc = run(az(['sig', 'show'], subscription) + [
                    '--resource-group', resource_group,
                    '--gallery-name', sig_name
                    ], retries=3, check=False, retry_func=not_found_no_retry)
     if rc != 0:
-        yield '{0}: No Kamino VMSS Prototype Shared Image Gallery for cluster'.format(sub_args.name)
+        yield 'No Kamino VMSS Prototype Shared Image Gallery for cluster'
         return
 
     for vmss in get_vmss_set():
@@ -363,7 +365,7 @@ def vmss_prototype_collect_status(sub_args):
                             '--gallery-image-definition', image_definition
                             ], retries=3, check=False, retry_func=not_found_no_retry)
         if rc != 0:
-            yield '{0}: {1}: No Kamino VMSS Prototype Image Definition'.format(sub_args.name, vmss)
+            yield '{0}: {1}: No Kamino VMSS Prototype Image Definition'.format(sub_args.resource_group, vmss)
             continue
 
         image_def = json.loads(output)
@@ -374,12 +376,12 @@ def vmss_prototype_collect_status(sub_args):
                             '--gallery-image-definition', image_definition
                             ], retries=3, check=False, retry_func=not_found_no_retry)
         if rc != 0:
-            yield '{0}: {1}: Failed to get Kamino VMSS Prototype Image Definition Versions'.format(sub_args.name, vmss)
+            yield '{0}: {1}: Failed to get Kamino VMSS Prototype Image Definition Versions'.format(sub_args.resource_group, vmss)
             continue
 
         versions = json.loads(output)
         if len(versions) < 1:
-            yield '{0}: {1}: No Kamino VMSS Prototype Image Definition Versions'.format(sub_args.name, vmss)
+            yield '{0}: {1}: No Kamino VMSS Prototype Image Definition Versions'.format(sub_args.resource_group, vmss)
             continue
 
         output, _, _ = run(az(['vmss', 'show'], subscription) + [
@@ -391,7 +393,7 @@ def vmss_prototype_collect_status(sub_args):
         versions.sort(key=lambda image: image['name'])
         for version in reversed(versions):
             yield '{0}: {1}: VMSS Prototype Image Version {2} - {3} - BuiltFrom: {4} @ {5}'.format(
-                sub_args.name,
+                sub_args.resource_group,
                 vmss,
                 lookup_one_value(version, 'name'),
                 lookup_one_value(version, 'provisioningState'),
@@ -402,16 +404,16 @@ def vmss_prototype_collect_status(sub_args):
         image_ref = lookup_one_value(vmss_info, 'virtualMachineProfile.storageProfile.imageReference.id')
         found = False
         if image_ref == image_def['id']:
-            yield '{0}: {1}: Configured to use latest VMSS Prototype Image Definition'.format(sub_args.name, vmss)
+            yield '{0}: {1}: Configured to use latest VMSS Prototype Image Definition'.format(sub_args.resource_group, vmss)
             found = True
         else:
             for version in versions:
                 if image_ref == version['id']:
-                    yield '{0}: {1}: Configured to use VMSS Prototype Image Version {2}'.format(sub_args.name, vmss, version['name'])
+                    yield '{0}: {1}: Configured to use VMSS Prototype Image Version {2}'.format(sub_args.resource_group, vmss, version['name'])
                     found = True
 
         if not found:
-            yield '{0}: {1}: Not configured to use VMSS Prototype Image'.format(sub_args.name, vmss)
+            yield '{0}: {1}: Not configured to use VMSS Prototype Image'.format(sub_args.resource_group, vmss)
 
 
 def vmss_prototype_status(sub_args):
@@ -420,9 +422,12 @@ def vmss_prototype_status(sub_args):
     :param sub_args:  Command line arguments
     :return:
     """
+    if not sub_args.resource_group:
+        fatal_error('Must provide the resource group of the cluster!')
+
     # Gather the results and then print them
     results = list(vmss_prototype_collect_status(sub_args))
-    print('VMSS Prototype Status for cluster {0}:'.format(sub_args.name))
+    print('VMSS Prototype Status for cluster:')
     for result in results:
         print(result)
 
@@ -503,10 +508,13 @@ def vmss_prototype_update(sub_args):
     :param sub_args:  Arguments from command line
     :return:
     """
-    subscription = sub_args.subscription
     resource_group = sub_args.resource_group
-    sig_name = get_vmss_sig(sub_args.name)
+    if not resource_group:
+        fatal_error('Must provide the resource group of the cluster!')
+
+    subscription = sub_args.subscription
     target_node = sub_args.target_node
+    sig_name = get_vmss_sig(resource_group)
 
     # Check if the target node exists
     _, _, rc = run(['kubectl', 'get', 'node',
@@ -563,7 +571,7 @@ def vmss_prototype_update(sub_args):
                            '--gallery-name', sig_name,
                            '--gallery-image-definition', image_definition,
                            '--publisher', 'VMSS-Prototype-Pattern',
-                           '--offer', sub_args.name,
+                           '--offer', sub_args.resource_group,
                            '--sku', vmss,
                            '--os-type', 'Linux',
                            '--os-state', 'generalized'
@@ -658,7 +666,7 @@ def vmss_prototype_update(sub_args):
                                 '--grace-period', sub_args.grace_period,
                                 '--timeout', '{0}s'.format(sub_args.grace_period * 3),
                                 target_node
-                                ], check=False, retries=2, timeout=60 + sub_args.grace_period * 9)
+                                ], check=False, retries=2, log_timing=True, timeout=60 + sub_args.grace_period * 9)
 
                 if rc != 0:
                     if not sub_args.force:
@@ -685,7 +693,7 @@ def vmss_prototype_update(sub_args):
                     '--resource-group', resource_group,
                     '--name', vmss,
                     '--instance-ids', instance_id
-                    ], retries=3, retry_func=not_found_no_retry)
+                    ], retries=3, log_timing=True, retry_func=not_found_no_retry)
 
                 # Snapshot the disk
                 output, _, _ = run(az(['snapshot', 'create'], subscription) + [
@@ -823,15 +831,100 @@ def vmss_prototype_update(sub_args):
                 ], retries=3, check=False, retry_func=not_found_no_retry)
 
 
-def ClusterName(v):
-    """
-    Cluster Name validation type for argparser ( 1 to 18 characters of A-Z/a-z/0-9/- )
-    :param v: The proposed cluster name
-    :return: The cluster name if it fits within naming constraints
-    """
-    if re.match(r'^[0-9a-zA-Z-]+$', v) is None:
-        raise argparse.ArgumentTypeError("Cluster names must consist of characters A-Z, a-z, 0-9, or -")
-    return v
+def in_cluster(sub_args, func):
+    '''
+    Check for in-cluster behavior and do the that to set up some values in the
+    arguments before calling the given func
+    :param sub_args: The sub_args as given from the command line
+    :param func: The function to complete the operation
+    '''
+    if sub_args.in_cluster:
+        with open('/etc/kubernetes/azure.json', 'r') as azure_json_file:
+            data = json.load(azure_json_file)
+        username = data['aadClientId']
+        password = data['aadClientSecret']
+        tenant = data['tenantId']
+        subscription = data['subscriptionId']
+        resource_group = data['resourceGroup']
+
+        # We have to set our default cloud (the public cloud is the default-default)
+        cloud = data['cloud']
+
+        # NOTE!  We have some remapping needs of the cloud name.
+        #        The problem is that the cloud name as stored in this json does
+        #        not match the cloud name that is used by azure CLI!
+        # NOTE!  'AzurePublicCloud' must be mapped to 'AzureCloud'
+        # NOTE!  'AzureUSGovernmentCloud' must be mapped to 'AzureUSGovernment'
+        remapping = {
+            'AzurePublicCloud': 'AzureCloud',
+            'AzureUSGovernmentCloud': 'AzureUSGovernment'
+        }
+        cloud = remapping.get(cloud, cloud)
+
+        # For air-gapped clouds, CustomCloudProfile needs to be specified in api-model
+        # when CustomCloudProfile is specified in api-model, aks engine produces azure.json
+        # with "cloud":"AzureStackCloud" and azurestackcloud.json with cloud name specified
+        # in the CustomCloudProfile
+        # https://github.com/Azure/aks-engine/pull/3063
+
+        if cloud == "AzureStackCloud":
+            with open('/etc/kubernetes/azurestackcloud.json', 'r') as azurestackfile:
+                azurestackdata = json.load(azurestackfile)
+
+            cloud = azurestackdata['name']
+
+            # check if custom cloud is already registered
+            registered_cloud, _, _ = run(["az", "cloud", "list",
+                                          "--output", "tsv",
+                                          "--query", "[?@.name == '{0}'].name".format(cloud)
+                                          ])
+
+            # registered_cloud comes with trainling white space, so remove it
+            if registered_cloud.strip() != cloud:
+                # cloud is not registered
+                # Register the cloud
+                run(['az', 'cloud', 'register',
+                     '--name', cloud,
+                     '--endpoint-active-directory', azurestackdata['activeDirectoryEndpoint'],
+                     '--endpoint-active-directory-graph-resource-id', azurestackdata['graphEndpoint'],
+                     '--endpoint-active-directory-resource-id', azurestackdata['resourceManagerEndpoint'],
+                     '--endpoint-management', azurestackdata['serviceManagementEndpoint'],
+                     '--endpoint-resource-manager', azurestackdata['resourceManagerEndpoint'],
+                     '--suffix-acr-login-server-endpoint', azurestackdata['containerRegistryDNSSuffix'],
+                     '--suffix-keyvault-dns', azurestackdata['keyVaultDNSSuffix'],
+                     '--suffix-storage-endpoint', azurestackdata['storageEndpointSuffix']
+                     ])
+
+        run(['az', 'cloud', 'set',
+             '--name', cloud
+             ])
+
+        login_cmd = ['az', 'login',
+                    '--username', username,
+                    '--password', password,
+                    '--tenant', tenant,
+                    '--service-principal'
+                    ]
+        masq = [username, password, tenant]
+
+        # We have seen temporary network failures cause this to fail so we will
+        # add a simple retry loop here, with slowly increasing delay between
+        # each retry.
+        run(['az', 'login',
+             '--username', username,
+             '--password', password,
+             '--tenant', tenant,
+             '--service-principal'
+             ], retries=10, masq=masq, retry_wait_duration_func=lambda num_retry: 5 * num_retry + 1)
+
+        run(['az', 'account', 'set',
+             '--subscription', subscription
+             ])
+
+        sub_args.subscription = subscription
+        sub_args.resource_group = resource_group
+
+    return func(sub_args)
 
 
 def NodeName(v):
@@ -879,16 +972,18 @@ def add_command(subparsers, command, func, description=None):
     :return: The parser for the command that was added
     """
     parser = subparsers.add_parser(command, description=description, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("-n", "--name", required=True, type=ClusterName,
-                        help="Name of the cluster (required)")
-    parser.add_argument("-g", "--resource-group", required=True,
-                        help="Name of the resource group the cluster is in (required)")
+    parser.set_defaults(func=lambda sub_args: in_cluster(sub_args, func))
+
+    # We need the resource group of the cluster.  When --in-cluster, this is
+    # discovered from the azure.json cluster definition file on the node
+    parser.add_argument("-g", "--resource-group", default=None,
+                        help="Name of the resource group the cluster is in (required if not --in-cluster)")
+
     # We take a subscription in case the user has access to more than one in the
-    # az cli - since we need to pick the right subscription.  We could talk about
-    # assuming that the correct subscription is already set as default.
+    # az cli - since we need to pick the right subscription.  When --in-cluster,
+    # this is discovered from the azure.json cluster definition file on the node
     parser.add_argument("-s", "--subscription", default=None, type=SubscriptionId,
-                        help="The subscription guid for the cluster's resource group")
-    parser.set_defaults(func=func)
+                        help="The subscription guid for the cluster's resource group (required if not --in-cluster)")
 
     return parser
 
@@ -976,6 +1071,9 @@ def main():
 
     parser.add_argument('--log-timestamps', default=False, action='store_true',
                         help='Include timestamps in the logging output')
+
+    parser.add_argument("--in-cluster", default=False, action='store_true',
+                        help="Use azure.json to set up state (including subscription, resource group, and azure access)")
 
     subparser = parser.add_subparsers(title="commands")
 

@@ -1,0 +1,132 @@
+{{- if hasKey .Values "kamino" -}}
+{{- $jobName := printf "%s-%s" .Values.kamino.name "status" -}}
+{{- if hasKey .Values.kamino "targetNode" -}}
+{{- $jobName = printf "%s-%s" .Values.kamino.name (substr 0 (int (sub (len .Values.kamino.targetNode) 6)) .Values.kamino.targetNode) -}}
+{{- end -}}
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $jobName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ .Values.kamino.labels.app }}
+    kamino: {{ $jobName }}
+    helm/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+    {{- if hasKey .Values.kamino "targetNode" }}
+    targetNode: {{ .Values.kamino.targetNode }}
+    {{- end }}
+spec:
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.kamino.labels.app }}
+        kamino: {{ $jobName }}
+        helm/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+        {{- if hasKey .Values.kamino "targetNode" }}
+        targetNode: {{ .Values.kamino.targetNode }}
+        {{- end }}
+    spec:
+      restartPolicy: Never
+
+      {{- if hasKey .Values.kamino.container "pullSecret" }}
+      imagePullSecrets:
+        - name: {{ .Values.kamino.container.pullSecret }}
+      {{- end}}
+
+      # We set up a required affinity run on a node that is
+      # note the target node we are about to shut down.
+      # (Only if we have a targetNode)
+      {{- if hasKey .Values.kamino "targetNode" }}
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchFields:
+              - key: metadata.name
+                operator: NotIn
+                values:
+                - {{ .Values.kamino.targetNode }}
+      {{- end }}
+
+      containers:
+        - name: {{ .Values.kamino.name }}
+          image: {{ template "image.full" .Values.kamino.container }}
+          imagePullPolicy: {{ template "image.pull" .Values.kamino.container }}
+
+          command:
+            - vmss-prototype
+          args:
+            - --in-cluster
+            - --log-level
+            - {{ required "missing required kamino.logLevel" .Values.kamino.logLevel }}
+            {{- if hasKey .Values.kamino "targetNode" }}
+            # Use the target node as our source for the new prototype image
+            - update
+            - --target-node
+            - {{ .Values.kamino.targetNode | quote }}
+            - --grace-period
+            - {{ required "missing required kamino.drain.gracePeriod" .Values.kamino.drain.gracePeriod | quote }}
+            - --max-history
+            - {{ required "missing required kamino.imageHistory" .Values.kamino.imageHistory | quote }}
+            {{- else }}
+            # Just a status run
+            - status
+            {{- end }}
+
+          env:
+            # We use the in-cluster kubeconfig
+            - name: KUBECONFIG
+              value: /.kubeconfig
+
+            # This gets mapped here since the node has cloud local CA bundles we need
+            - name: REQUESTS_CA_BUNDLE
+              value: /etc/ssl/certs/ca-certificates.crt
+
+            # Pass in the name of the node on which this pod is scheduled
+            # This is not actually used right now... will be in the future
+            - name: NODE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+
+          volumeMounts:
+            - name: host-sp
+              mountPath: /etc/kubernetes
+              readOnly: true
+            - name: kubectl
+              mountPath: /usr/bin/kubectl
+              readOnly: true
+            - name: kubeconfig
+              mountPath: /.kubeconfig
+              readOnly: true
+            - name: host-crt
+              mountPath: /etc/ssl/certs/ca-certificates.crt
+              readOnly: true
+
+      volumes:
+        - name: host-sp
+          hostPath:
+            # this file contains the cluster specific details, including azure info
+            path: /etc/kubernetes
+            type: Directory
+
+        - name: kubectl
+          hostPath:
+            path: /usr/local/bin/kubectl
+            type: File
+
+        - name: kubeconfig
+          hostPath:
+            path: /var/lib/kubelet/kubeconfig
+            type: File
+
+        - name: host-crt
+          hostPath:
+            path: /etc/ssl/certs/ca-certificates.crt
+            type: File
+
+      # We really only want linux nodes (this is of no use for Windows nodes)
+      nodeSelector:
+        beta.kubernetes.io/os: linux
+{{- end }}
