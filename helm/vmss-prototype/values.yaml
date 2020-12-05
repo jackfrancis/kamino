@@ -1,0 +1,49 @@
+# Some default values for the Kamino VMSS-Prototype Pattern Image Generator
+
+kamino:
+  name: kamino-gen
+  labels:
+    app: kamino-vmss-prototype
+  container:
+    # TODO:  Point these to our public container registry once we have it setup
+    imageRegistry: some.acr.io
+    imageRepository: some/path/kamino/vmss-prototype
+    imageTag: testing
+    # Pulling by has is stronger assurance that things are not changed
+    #imageHash: "xxx"
+    # Since we don't define a hash here, set this to false
+    pullByHash: false
+
+    # include the name of the image pull secret in your cluster if you
+    # need one.  (Note that they are local to the namespace you deploy in)
+    #pullSecret: skyman-acr
+
+  # Number of images to keep in the history
+  # Minimum is 2.
+  imageHistory: 3
+
+  drain:
+    # Drain grace period is the maximum time to allow pods to drain load
+    # and leave the node.  The default of 300 seconds is relatively long
+    # but extra safe.
+    gracePeriod: 300
+
+    # Drain Force, if set to true, will force drain the node if the normal
+    # drain fails to drain the node.  This may be needed if the drain operation
+    # is not respected by the workloads in the cluster.
+    force: false
+
+  # This is the log-level for the process via python logging.
+  # Each level includes all below it, so DEBUG includes INFO, WARNING, etc...
+  # Best keep this at INFO
+
+  # DEBUG    - Very verbose (albeit not that much more than INFO)
+  # INFO     - Show all process executions and actions as progress
+  # WARNING  - Show only the warnings
+  # ERROR    - Show only the errors
+  # CRITICAL - Show only complete critical faults
+  logLevel: INFO
+
+  # The cluster name and the target node are not things we can know
+  # automatically
+  #targetNode: k8s-agentpool1-12345678-vmss0001ct

@@ -12,7 +12,6 @@ docker run --rm -i -t ${IMAGE_TAG} --help
 # the resource group name so I can test like this.  Others may not)
 # When run in the cluster, other mechanisms would be used
 if [[ ! -z ${KUBECONFIG} ]] &&
-   [[ ! -z ${CLUSTER_NAME} ]] &&
    [[ ! -z ${RESOURCE_GROUP} ]] &&
    [[ ! -z ${AZ_SUB} ]] &&
    [[ -f ${KUBECONFIG} ]] &&
@@ -28,7 +27,6 @@ if [[ ! -z ${KUBECONFIG} ]] &&
             -e KUBECONFIG=${KUBECONFIG} \
             ${IMAGE_TAG} \
             status \
-                --name ${CLUSTER_NAME} \
                 --resource-group ${RESOURCE_GROUP} \
                 --subscription ${AZ_SUB}
 fi
