@@ -255,8 +255,8 @@ def node_to_vmss(node_name):
 
 def get_vmss_set():
     """
-    Get the sorted list of VMSS that could be set to run prototype model
-    :return: A set of valid VMSS for this cluster that could run prototype model
+    Get the sorted list of VMSS that could be set to run prototype pattern
+    :return: A set of valid VMSS for this cluster that could run prototype pattern
     """
     # The set of VMSS in the cluster
     return sorted({node_to_vmss(node) for node in get_nodes() if is_vmss_node(node)})
@@ -995,7 +995,7 @@ def register_commands(subparser):
     :return: True if the command was added
     """
     parser = add_command(subparser, "status", func=vmss_prototype_status,
-                         description='Show status of VMSS Prototype model')
+                         description='Show status of VMSS Prototype Pattern')
 
     parser = add_command(subparser, "update", func=vmss_prototype_update,
                          description='Set up new/updated prototype')
@@ -1059,9 +1059,9 @@ def main():
         description="VMSS Prototype Pattern Tool",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="\nexample use: \n\
-  vmss-prototype.py status ...\n\n\
+  {0} status ...\n\n\
   More information available here: https://speechwiki.azurewebsites.net/architecture/skyman-vmss-prototype-pattern.html\n\
-    "
+    ".format(sys.argv[0])
     )
 
     # Log level settings happen at the global level
