@@ -31,8 +31,8 @@ jobs:
         uses: docker/build-push-action@v2
         with:
           push: true
-          context: './vmss-prototype'
-          file: './Dockerfile'
+          context: vmss-prototype
+          file: vmss-prototype/Dockerfile
           tags: |
             ghcr.io/jackfrancis/kamino:${{ env.RELEASE_VERSION }}
             ghcr.io/jackfrancis/kamino:latest
