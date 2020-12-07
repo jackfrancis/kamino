@@ -5,9 +5,11 @@ version: 0.0.1
 maintainers:
   - name: Michael Sinz
     email: msinz@microsoft.com
-home: https://speechwiki.azurewebsites.net/architecture/skyman-vmss-prototype-pattern.html
+  - name: Jack Francis
+    email: jackfrancis@gmail.com
+home: https://github.com/jackfrancis/kamino/README.md
 sources:
-  - https://github.com/Michael-Sinz/kamino
+  - https://github.com/jackfrancis/kamino
 keywords:
   - vmss
   - azure
