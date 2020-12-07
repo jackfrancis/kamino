@@ -899,23 +899,30 @@ def in_cluster(sub_args, func):
              '--name', cloud
              ])
 
-        login_cmd = ['az', 'login',
-                    '--username', username,
-                    '--password', password,
-                    '--tenant', tenant,
-                    '--service-principal'
-                    ]
+        if username == "msi":
+            login_cmd = ['az', 'login', '--identity']
+        else:
+            login_cmd = ['az', 'login',
+                        '--username', username,
+                        '--password', password,
+                        '--tenant', tenant,
+                        '--service-principal'
+                        ]
         masq = [username, password, tenant]
 
         # We have seen temporary network failures cause this to fail so we will
         # add a simple retry loop here, with slowly increasing delay between
         # each retry.
-        run(['az', 'login',
-             '--username', username,
-             '--password', password,
-             '--tenant', tenant,
-             '--service-principal'
-             ], retries=10, masq=masq, retry_wait_duration_func=lambda num_retry: 5 * num_retry + 1)
+        if username == "msi":
+            run(['az', 'login', '--identity'
+            ], retries=10, masq=masq, retry_wait_duration_func=lambda num_retry: 5 * num_retry + 1])
+        else:
+            run(['az', 'login',
+                '--username', username,
+                '--password', password,
+                '--tenant', tenant,
+                '--service-principal'
+                ], retries=10, masq=masq, retry_wait_duration_func=lambda num_retry: 5 * num_retry + 1)
 
         run(['az', 'account', 'set',
              '--subscription', subscription
