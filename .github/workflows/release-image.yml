@@ -33,5 +33,5 @@ jobs:
           push: true
           file: vmss-prototype/Dockerfile
           tags: |
-            ghcr.io/jackfrancis/kamino:${{ env.RELEASE_VERSION }}
-            ghcr.io/jackfrancis/kamino:latest
+            ghcr.io/jackfrancis/kamino/vmss-prototype:${{ env.RELEASE_VERSION }}
+            ghcr.io/jackfrancis/kamino/vmss-prototype:latest
