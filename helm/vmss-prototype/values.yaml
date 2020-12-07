@@ -6,9 +6,9 @@ kamino:
     app: kamino-vmss-prototype
   container:
     # TODO:  Point these to our public container registry once we have it setup
-    imageRegistry: some.acr.io
-    imageRepository: some/path/kamino/vmss-prototype
-    imageTag: testing
+    imageRegistry: ghcr.io
+    imageRepository: jackfrancis/kamino/vmss-prototype
+    imageTag: latest
     # Pulling by has is stronger assurance that things are not changed
     #imageHash: "xxx"
     # Since we don't define a hash here, set this to false
