@@ -47,3 +47,7 @@ kamino:
   # The cluster name and the target node are not things we can know
   # automatically
   #targetNode: k8s-agentpool1-12345678-vmss0001ct
+
+  # Require scheduling the pod onto a control plane VM using the AKS Engine control plane VM identifier
+  # Default to false, which allows scheduling on any node other than the targetNode
+  scheduleOnControlPlane: false

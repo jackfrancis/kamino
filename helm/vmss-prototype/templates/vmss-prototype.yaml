@@ -126,7 +126,17 @@ spec:
             path: /etc/ssl/certs/ca-certificates.crt
             type: File
 
+      # Tolerate the AKS Engine control plane taint, to accommodate clusters with only one VMSS node
+      tolerations:
+      - key: node-role.kubernetes.io/master
+        operator: Equal
+        value: "true"
+        effect: NoSchedule
       # We really only want linux nodes (this is of no use for Windows nodes)
       nodeSelector:
+        # Optionally, require scheduling the pod onto a control plane VM using the AKS Engine control plane VM identifier
+        {{- if .Values.kamino.scheduleOnControlPlane }}
+        kubernetes.io/role: master
+        {{- end }}
         beta.kubernetes.io/os: linux
 {{- end }}
