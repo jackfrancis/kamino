@@ -900,13 +900,14 @@ def in_cluster(sub_args, func):
              ])
 
         login_cmd = ['az', 'login',
-                        '--username', username,
-                        '--password', password,
-                        '--tenant', tenant,
-                        '--service-principal'
-                        ]
+                    '--username', username,
+                    '--password', password,
+                    '--tenant', tenant,
+                    '--service-principal'
+                    ]
         if username == "msi":
             login_cmd = ['az', 'login', '--identity']
+        masq = [username, password, tenant]
 
         # We have seen temporary network failures cause this to fail so we will
         # add a simple retry loop here, with slowly increasing delay between
