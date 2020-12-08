@@ -912,7 +912,7 @@ def in_cluster(sub_args, func):
         # We have seen temporary network failures cause this to fail so we will
         # add a simple retry loop here, with slowly increasing delay between
         # each retry.
-        run(login_cmd, retries=10, masq=masq, retry_wait_duration_func=lambda num_retry: 5 * num_retry + 1])
+        run(login_cmd, retries=10, masq=masq, retry_wait_duration_func=lambda num_retry: 5 * num_retry + 1)
 
         run(['az', 'account', 'set',
              '--subscription', subscription
