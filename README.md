@@ -36,7 +36,7 @@ The above will create job `update-vmss-model-image-from-instance-0` in the `defa
 
 - You run the above helm command in an execution context where the `KUBECONFIG` environment variable is set to the kubeconfig file that identifies a privileged connection to the Kubernetes cluster whose node pool you want to update.
 - The node `k8s-pool1-12345678-vmss000000` is running in your cluster, backed by an Azure VMSS instance, and is in a Ready state.
-- Your Kubernetes + Azure cluster was created by the [AKS Engine][https://github.com/Azure/aks-engine] tool (`vmss-prototype` will work with Kubernetes + Azure generally in the future: for now it is validated as known-working against AKS Engine-created clusters running VMSS node pools).
+- Your Kubernetes + Azure cluster was created by the [AKS Engine](https://github.com/Azure/aks-engine) tool (`vmss-prototype` will work with Kubernetes + Azure generally in the future: for now it is validated as known-working against AKS Engine-created clusters running VMSS node pools).
 
 We suggest the Job name `update-vmss-model-image-from-instance-0` only as a hypothetical example: you may choose any name you wish. Also, the targetNode value `k8s-pool1-12345678-vmss000000` is entirely a hypothetical example: make sure you use a value that correlates with an actual node that was created by an Azure VMSS that you want to update.
 
