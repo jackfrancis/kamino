@@ -19,8 +19,8 @@ $ helm --install --repo https://jackfrancis.github.io/kamino/ vmss-prototype \
 
 - It expects an Azure cloud provider config file at the path `/etc/kubernetes/azure.json` on the node VM that the job's pod is scheduled onto (in the above example we instruct Helm to create a job named "update-vmss-model-image-from-instance-0").
   - Or, it expects the control plane to be MSI-enabled using system-assigned identity, and to be invoked via `helm install` using the `--set kamino.scheduleOnControlPlane=true` option.
-- It expects the targetNode to be a Linux node (no Windows node support)
-- It expects that the set of systemd service definitions (kublet, containerd|docker, etc) to be implemented generically with respect to the underlying hostname.
+- It expects the targetNode to be a Linux node (no Windows node support).
+- It expects that the set of systemd service definitions (kublet, containerd|docker, etc) to be implemented generically with respect to the underlying hostname. In other words, it expects that there are no static references to a very particular hostname string, but instead all local references will derive from a runtime reference equivalent to `$(hostname)`.
 - It expects the Kubernetes application layer (i.e., kubelet) to defer to the network stack for IP address information — i.e., it expects no static IP configuration to be present.
 - It expects the Azure VMSS definition to have a "DHCP-like" network configuration for instances as they are created; again, no static IP address configurations.
 
