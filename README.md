@@ -29,7 +29,7 @@ The kamino project publishes a Helm Chart called "vmss-prototype". You may use t
 $ helm --install --repo https://jackfrancis.github.io/kamino/ vmss-prototype \
   update-vmss-model-image-from-instance-0 --namespace default \
   --set kamino.scheduleOnControlPlane=true \
-	--set kamino.targetNode=k8s-pool1-12345678-vmss000000
+  --set kamino.targetNode=k8s-pool1-12345678-vmss000000
 ```
 
 The above will create job `update-vmss-model-image-from-instance-0` in the `default` Kubernetes namespace if a few assumptions are true:
