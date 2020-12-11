@@ -83,11 +83,11 @@ That's how it works! Hopefully all that level of detail helps to solidify the va
 
 `vmss-prototype` is packaged for use as a Helm Chart, hosted at the `https://jackfrancis.github.io/kamino/` Helm Repository.
 
-The following Helm Chart values are exposed to configure a `vmss-prototype` job execution:
+The following Helm Chart values are exposed to configure a `vmss-prototype` release:
 
 - `kamino.targetNode` (required)
   - e.g., `--set kamino.targetNode=k8s-pool1-12345678-vmss000000`
-  - This is the node to derive a "prototype" from. Must exist in your cluster, be in a Ready state, and be backed by a VMSS-created instance. The VMSS (scale set) that this node instance is a part of will be updated as part of the `vmss-prototpe` operation. We recommend you choose a node that has been validated against your operational criteria (e.g., running the latest OS patches and/or security hotfixes). We also recommend that you choose a node that is performing an operational role suitable for being taken temporarily out of service, as the `vmss-prototype` operation will include a cordon + drain against this node.
+  - This is the node to derive a "prototype" from. Must exist in your cluster, be in a Ready state, and be backed by a VMSS-created instance. The VMSS (scale set) that this node instance is a part of will be updated as part of the `vmss-prototpe` operation. We recommend you choose a node that has been validated against your operational criteria (e.g., running the latest OS patches and/or security hotfixes). We also recommend that you choose a node that is performing an operational role suitable for being taken temporarily out of service, as the `vmss-prototype` operation will include a cordon + drain against this node in order to shut down the VMSS instance and take a snapshot of the OS disk.
 
 - `kamino.scheduleOnControlPlane` (default value is `false`)
   - e.g., `--set kamino.scheduleOnControlPlane=true`
@@ -95,14 +95,14 @@ The following Helm Chart values are exposed to configure a `vmss-prototype` job 
 
 - `kamino.imageHistory` (default value is `3`)
   - e.g., `--set kamino.imageHistory=5`
-  - Override the default if you wish to retain more or fewer Shared Image Gallery OS snapshot images in the VMSS-specific SIG created by `vmss-prototype`. One SIG per VMSS will be created by `vmss-prototype`; invoking a custom value of `imageHistory` during a run of `vmss-prototype` will inform how many, if any, existing SIG images in that VMSS-specific SIG to prune.
+  - Override the default if you wish to retain more or fewer Shared Image Gallery OS snapshot images in the VMSS-specific SIG Image Definition created by `vmss-prototype`. One SIG per VMSS will be created by `vmss-prototype`; invoking a custom value of `imageHistory` during a run of `vmss-prototype` will inform how many, if any, existing SIG images in that VMSS-specific SIG Image Definition to prune.
 
 - `kamino.drain.gracePeriod` (default value is `300`)
-  - e.g., `--set kamino.drain.gracePeriod=5`
+  - e.g., `--set kamino.drain.gracePeriod=60`
   - Override the default if you wish to allow more or less time for the pods running on the node to gracefully exit. This is directly equivalent to the `--grace-period` flag of the `kubectl drain` CLI operation
 - `kamino.drain.force` (default value is `false`)
   - e.g., `--set kamino.drain.force=true`
-  - Override the default if you wish to force a drain even if the grace period has expired, or if there are non-replicated pods (e.g., not part of a ReplicationController, ReplicaSet [Deployment], DaemonSet, StatefulSet or Job). This is directly equivalent to the `--force` flag of the `kubectl drain` CLI operation
+  - Override the default if you wish to force a drain even if the grace period has expired, or if there are non-replicated pods (e.g., not part of a ReplicationController, ReplicaSet [i.e., Deployment], DaemonSet, StatefulSet or Job). This is directly equivalent to the `--force` flag of the `kubectl drain` CLI operation
 
 More documentation on node drain can be found [here in the `kubectl` documentation](https://kubernetes.io/docs/reference/generated/kubectl/kubectl-commands#drain).
 
