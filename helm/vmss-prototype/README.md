@@ -36,7 +36,7 @@ The problems that `vmss-prototype` aims to solve are three-fold:
 2. In addition, there is a validation problem with respect to introducing "new, updated versions of nodes" generally. How do we confidently know that _a new node recipe will actually work_ before applying that new node recipe in production? The `vmss-prototype` solution solves for this by _using existing, known-working nodes running in the *actual target cluster environment*_ to produce the new node recipe.
 3. Finally, a (welcome!) side-effect of (1) priming the node in advance to have all the latest, good stuff already present and (2) optimizing for reliability by assuring known-working outcomes solves the problem "How can I ensure that new nodes come online as quickly as possible when I need them?"
 
-## Problem #1 - Get the Latest, Good Stuff
+### Remarks About Problem #1 - Get the Latest, Good Stuff
 
 It should be mentioned that one way to partially solve this problem without a tool like `vmss-prototype` would be to ensure that your VMSS model references a _mutable_ OS image release channel (e.g. Canonical Ubuntu 18.04 @ a "latest" version/tag). In such a configuration, the VMSS instances rendered over time would follow the OS updates and patches delivered by your preferred OS distribution.
 
