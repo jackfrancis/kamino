@@ -28,7 +28,7 @@ The above details reflect operational configurations produced by a Kubernetes + 
 
 ## Why would I want to use vmss-prototype?
 
-Firstly, for an in-depth discussion of the problem domain the kamino project aims to address, please read [this documentation](../../docs/status.md).
+Firstly, for an in-depth discussion of the problem domain the kamino project aims to address, please read [this documentation](../../docs/origins.md).
 
 The problems that `vmss-prototype` aims to solve are three-fold:
 
