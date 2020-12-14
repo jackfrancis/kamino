@@ -2,6 +2,11 @@
 
 `vmss-prototype` takes a snapshot of the OS image from one instance in your VMSS node pool, and then updates the VMSS model definition so that future instances use that image snapshot.
 
+This simple concept can dramatically improve node scaling response time and reliability:
+
+1. Pick your best node running in a pool.
+2. Make all new nodes like it.
+
 ## Example
 
 Below is the canonical way to run vmss-prototype on your cluster using our published Helm Chart:
@@ -57,27 +62,34 @@ The `vmss-prototype` operation carries out a procedural set of steps, each of wh
 
 1. Create an Azure API connection with the appropriate privileges needed in order to create resources in the cluster resource group.
 2. Validate (1) that the targetNode exists in the cluster, (2) is a VMSS instance, and (3) is in a Ready state.
-3. Create a named _Shared Image Gallery_ (SIG) resource in the cluster, if it doesn't already exist. The name of this SIG will be `"SIG_<cluster_name>"`, where `<cluster_name` is the name of your cluster. Because the name of your cluster does not change, and is unique to the cluster + resource group, this named SIG will always exist so long as `vmss-prototype` is being used. It's also easy to create idempotently: if it's already there, we just use it; if it isn't, we know this is the first time that `vmss-prototype` has been run in this cluster.
+3. Create a named _Shared Image Gallery_ (SIG) resource in the cluster, if it doesn't already exist. The name of this SIG will be `"SIG_<resource_group>"`, where `<resource_group>` is the name of the resource group that your cluster resources (in particular your VMSS) are installed into. Because the resource group your cluster VMSS is running in does not change, this suffix can be considered a static constant: this SIG will always exist under that name so long as `vmss-prototype` is being used. It's also easy to create idempotently: if it's already there, we just use it; if it isn't, we know this is the first time that `vmss-prototype` has been run in this cluster.
 4. Create a named SIG _Image Definition_ within the named SIG created by the above step, if it doesn't already exist. An Image Definition is essentially a named bucket that will contain a bunch of "versioned" images. The name of this SIG Image Definition will be `kamino-<nodepool_name>-vmss-prototype`, where `<nodepool_name>` is the name of the VMSS node pool in your cluster. Similar to how we idempotently create the SIG itself, this Image Definition can be statically, uniquely identified so long as the node pool exists in your cluster.
 5. Verify that we have not yet created an Image Definition _version_ (in other words, an actual image) for this VMSS node pool in the last 24 hours. The Image Definition versions are named by date using a format `YYYY.MM.DD`, which means **you can only create one image per day, per VMSS node pool**.
-6. Similarly verify that we have not yet created an OS snapshot from the target VMSS instance in the last 24 hours. If we _do have an image with the current day's version_, then we don't fail the operation, but instead assume that we are in a retry context, and skip to step 13 below to build the SIG Image Definition version from the snapshot with today's date. If there is not an image with today's timestamp then we go to the next step:
+6. Similarly verify that we have not yet created an OS snapshot from the target VMSS instance in the last 24 hours. If we _do have an image with the current day's version_, then we don't fail the operation, but instead assume that we are in a retry context, and skip to step 14 below to build the SIG Image Definition version from the snapshot with today's date. If there is not an image with today's timestamp then we go to the next step:
 7. Add a node annotation of `"cluster-autoscaler.kubernetes.io/scale-down-disabled=true"` to the target node, so that if cluster-autoscaler is running in our cluster we prevent it from _deleting that node_ (that's what happens when you scale down), and thus deleting the VMSS instance, while we are taking an OS image snapshot of the instance.
-8. Cordon + drain the target node in preparation for taking it offline. If the cordon + drain fails, we assume that the safest response is to _force delete all pods off of this node as those pods may not be operationally viable_. Essentially, we rely upon cordon + drain to do the right thing, but when it isn't able for any reason, we assume that any remaining pods are not in a healthy, Running state, and so should be force removed rather than left in the cluster in the event that they may have non-desirable operational side-effects.
+8. Cordon + drain the target node in preparation for taking it offline. If the cordon + drain fails, we will fail the operation _unless we pass in the `--force` option to the `vmss-prototype` tool (see the Helm Chart usage of `kamino.drain.force` below)_.
 9. Deallocate the VMSS instance. This is a fancy, Azure-specific way of saying that we release the reservation of the underlying compute hardware running that instance virtual machine. This is a pre-condition to performing a snapshot of the underlying disk.
-10. Re-start up the VMSS instance. Now that we've taken a snapshot of the disk, there's no longer a need for this node to be out of service.
-11. Uncordon the node to allow Kubernetes to schedule workloads onto it.
-12. Remove the `cluster-autoscaler.kubernetes.io/scale-down-disabled` cluster-autoscaler node annotation as we no longer care if this node is chosen for removal by cluster-autoscaler.
-13. Build a new SIG Image Definition _version_ (i.e., the actual image we're going to update the VMSS to use) from the recently captured snapshot image. This takes a long time! In our tests we see a 30 GB image (the OS disk size default for many Linux distros) take between 30 minutes and 2 _hours_ to be rendered as a SIG Image Definition version!
-14. After the new SIG Image Definition version has been created, we delete the snapshot image as it will no longer be needed for use.
-15. We now prune older SIG Image Definition versions (configurable, see the usage of `kamino.imageHistory` in the official Helm Chart docs below).
-16. Update the target instance's VMSS model so that its OS image refers to the newly created SIG Image Definition version. This means that the very next instance built with this VMSS will derive from the newly created image. *This update operation does not affect existing instances: The VMSS will not perform a "rolling upgrade" to ensure that all instances are running this new OS image! Similarly, `vmss-prototype` **will not** perform a "rolling upgrade" across the other, existing VMSS instances, nor will it create new, replacement instances, and delete old instances!*
-17. Update the target instance's cloud-init configuration so that it no longer includes "one-time bootstrap" configuration. Because this instance was _already_ bootstrapped when the cluster was created, we don't need to perform those various prerequisite file system operations: by updating the VMSS's OS image reference to a "post-bootstrapped" image, `vmss-prototype` has made it unnecessary for new instances to perform this cloud-init bootstrap overhead: our new nodes will come online more quickly!
-18. Similarly, we remove any VMSS "Extensions" that were used to execute "one-time bootrap executable code" (i.e., all the stuff we execute to turn a vanilla Linux VM into a Kubernetes node running in a cluster), except for any "provenance-identifying" Extensions, e.g. "computeAksLinuxBilling". Similar to the cloud-init savings, `vmss-prototype` allows us to create new instances _already configured to come online immediately as Kubernetes nodes in this cluster!_
+10. Make a snapshot of the OS disk image attached to the deallocated VMSS instance.
+11. Re-start up the VMSS instance. Now that we've taken a snapshot of the disk, there's no longer a need for this node to be out of service.
+12. Uncordon the node to allow Kubernetes to schedule workloads onto it.
+13. Remove the `cluster-autoscaler.kubernetes.io/scale-down-disabled` cluster-autoscaler node annotation as we no longer care if this node is chosen for removal by cluster-autoscaler.
+14. Build a new SIG Image Definition _version_ (i.e., the actual image we're going to update the VMSS to use) from the recently captured snapshot image. This takes a long time! In our tests we see a 30 GB image (the OS disk size default for many Linux distros) take between 30 minutes and 2 _hours_ to be rendered as a SIG Image Definition version!
+15. After the new SIG Image Definition version has been created, we delete the snapshot image as it will no longer be needed for use.
+16. We now prune older SIG Image Definition versions (configurable, see the usage of `kamino.imageHistory` in the official Helm Chart docs below).
+17. Update the target instance's VMSS model so that its OS image refers to the newly created SIG Image Definition version. This means that the very next instance built with this VMSS will derive from the newly created image. *This update operation does not affect existing instances: The `vmss-prototype` tool does not instruct the VMSS API to perform a "rolling upgrade" to ensure that all instances are running this new OS image! Similarly, `vmss-prototype` **will not** perform a "rolling upgrade" across the other, existing VMSS instances, nor will it create new, replacement instances, and delete old instances!*
+18. Update the target instance's cloud-init configuration so that it no longer includes "one-time bootstrap" configuration. Because this instance was _already_ bootstrapped when the cluster was created, we don't need to perform those various prerequisite file system operations: by updating the VMSS's OS image reference to a "post-bootstrapped" image, `vmss-prototype` has made it unnecessary for new instances to perform this cloud-init bootstrap overhead: our new nodes will come online more quickly!
+19. Similarly, we remove any VMSS "Extensions" that were used to execute "one-time bootrap executable code" (i.e., all the stuff we execute to turn a vanilla Linux VM into a Kubernetes node running in a cluster), except for any "provenance-identifying" Extensions, e.g. "computeAksLinuxBilling". Similar to the cloud-init savings, `vmss-prototype` allows us to create new instances _already configured to come online immediately as Kubernetes nodes in this cluster!_
 
-That's how it works! Hopefully all that level of detail helps to solidify the value of as process as simple in concept as the following:
+That's how it works! Hopefully all that level of detail helps to solidify the value of having regularly, freshly configured nodes across your node pool. Once again:
 
 1. Pick your best node running in a pool.
 2. Make all new nodes like it.
+
+## A final note on VMSS instance rolling upgrades
+
+We consider it out of the scope of the `vmss-prototype` tool to reconcile the new VMSS model changes across the VMSS instances and leave it up to the user to do this work, if appropriate. The VMSS itself includes an "Upgrade" option to do a configurable rolling upgrade across instances that are not running the latest model; it's worth emphasizing that this is **not** a Kubernetes-friendly way to update nodes, as the VMSS does not know how to cordon + drain the Kubernetes workloads actively running as container executables on the instances.
+
+It's also worth emphasizing that the problem domain addressed by `vmss-prototype` is not _"Make all nodes the same"_, but is rather _"Update my node recipe so that all future nodes derive from my best, known-working node"_. This solves the practical challenge of ensuring that you get new nodes quickly when you need them. If you have a particular problem that requires your nodes in a pool to be as operationally identical as possible throughout the lifecycle of the cluster, you may use `vmss-prototype` as part of your solution, but gracefully applying VMSS model updates across all nodes is left as an exercise to the user.
 
 ## How to use vmss-prototype?
 
@@ -85,9 +97,9 @@ That's how it works! Hopefully all that level of detail helps to solidify the va
 
 The following Helm Chart values are exposed to configure a `vmss-prototype` release:
 
-- `kamino.targetNode` (required)
+- `kamino.targetNode` (required to actually create a new prototype updated the VMSS model)
   - e.g., `--set kamino.targetNode=k8s-pool1-12345678-vmss000000`
-  - This is the node to derive a "prototype" from. Must exist in your cluster, be in a Ready state, and be backed by a VMSS-created instance. The VMSS (scale set) that this node instance is a part of will be updated as part of the `vmss-prototpe` operation. We recommend you choose a node that has been validated against your operational criteria (e.g., running the latest OS patches and/or security hotfixes). We also recommend that you choose a node that is performing an operational role suitable for being taken temporarily out of service, as the `vmss-prototype` operation will include a cordon + drain against this node in order to shut down the VMSS instance and take a snapshot of the OS disk.
+  - This is the node to derive a "prototype" from. Must exist in your cluster, be in a Ready state, and be backed by a VMSS-created instance. The VMSS (scale set) that this node instance is a part of will be updated as part of the `vmss-prototpe` operation. We recommend you choose a node that has been validated against your operational criteria (e.g., running the latest OS patches and/or security hotfixes). We also recommend that you choose a node that is performing an operational role suitable for being taken temporarily out of service, as the `vmss-prototype` operation will include a cordon + drain against this node in order to shut down the VMSS instance and take a snapshot of the OS disk. If you omit this option, then `vmss-prototype` will not create a new prototype, but will instead report back the status of existing VMSS prototypes built from this tool by looking at all VMSS in the resource group.
 
 - `kamino.scheduleOnControlPlane` (default value is `false`)
   - e.g., `--set kamino.scheduleOnControlPlane=true`
