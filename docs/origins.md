@@ -1,6 +1,6 @@
 ## Origins
 
-The set of tooling in the kamino project begun as a small but significant feature of an internal Microsoft platform called Skyman, built to support various highly available, highly dynamic Cognitive Services operations inside Azure and Microsoft. Skyman is built on top of Kubernetes and Azure and runs many large production, real-time AI workloads.
+The set of tooling in the kamino project began as a small but significant feature of an internal Microsoft platform called Skyman, built to support various highly available, highly dynamic Cognitive Services operations inside Azure and Microsoft.  Skyman is built on top of Kubernetes and Azure and runs many large production, real-time AI workloads.
 
 The following documents some of the conceptual and practical thinking from that Skyman feature work. It is useful because it describes the design foundations that the kamino project will inherit.
 
@@ -10,7 +10,7 @@ In practice, we want to move "operational constants" out of the inner loop of re
 
 - avoid having to "re-configure" the OS for Kubernetes (e.g., re-plumb systemd)
 - get new nodes with OS patches already pre-installed
-- get new ndoes with common container images pre-pulled
+- get new ndoes with common container images pre-pulled (a pre-warmed container cache)
 
 Conceptually, we borrow from both the [Prototype Pattern](https://en.wikipedia.org/wiki/Prototype_pattern) and from [Memoization](https://en.wikipedia.org/wiki/Memoization); but, because we are dealing with higher order abstractions like production distributed systems, it is arguably the most correct to say that our solutions follow the [Prototype Pattern](https://en.wikipedia.org/wiki/Prototype_pattern).
 
@@ -18,11 +18,11 @@ Conceptually, we borrow from both the [Prototype Pattern](https://en.wikipedia.o
 
 The following comments on VMSS are specific to Azure. It's appropriate to go into some of that detail in order to describe the actual history; we leave it as an exercise for the reader to generalize the "VMSS" solution to "any VM factory that builds VMs from a common recipe".
 
-The normal VMSS pattern is to use some *generic base image* for VMSS and apply the cloud-init and shell script Extensions (by this we mean any configurable, concrete executable code tightly coupled to the VM bootstrap process) to each instance as they are created and join the cluster as a Kubernetes node. Basically, performing one-time, application domain-specific bootstrapping during each VM instance scale out operation.
+The normal VMSS pattern is to use some *generic base image* for VMSS and apply the cloud-init and shell script extensions (by this we mean any configurable, concrete executable code tightly coupled to the VM bootstrap process) to each instance as they are created and join the cluster as a Kubernetes node. Basically, performing one-time, application domain-specific bootstrapping during each VM instance scale out operation.
 
 This introduces problems in that those node bootstrap operations are a constant that we do inside the node scaling "loop" for each node we create.  Some of those operations involve network operations, for example to download pre-requisite code and/or configuration, all of which is paid for _on each node instance_ as it is scaled in.  Those operations are environment-specific (i.e., specific to the entire Virtual Machine Scale Set resource definition), but they are not instance-specific.
 
-OS patches and updates also need to be installed over the lifecyle of the nodes running in the cluster. Over time, newly introduced VMs (as a result of node scale out operations) will continue to be built with the original *generic base image* (according to the specification in the Virtual Machine Scale Set resource definition). In practice, this means that the set of OS patches and updates not originally included in that *generic base image* will increase with time. And in turn, this means with the progress of time, the cost to build new nodes will increase, as that cost will include a continually expanding set of OS patches and updates not already present when that VM comes online. This is an ever increasing cost to not just our service (cluster scale out events take longer as the cluster ages), but also to the network resources and OS patch servers which have to continually accommodate more and more load from our environment as it ages.
+OS patches and updates also need to be installed over the lifecyle of the nodes running in the cluster. Over time, newly introduced VMs (as a result of node scale out operations) will continue to be built with the original *generic base image* (according to the specification in the Virtual Machine Scale Set resource definition). In practice, this means that the set of OS patches and updates not originally included in that *generic base image* will increase with time. And in turn, this means with the progress of time, the cost to build new nodes will increase as it includes a continually expanding set of OS patches and updates not already present when that VM comes online. This is an ever increasing cost to not just our service (cluster scale out events take longer as the cluster ages), but also to the network resources and OS patch servers which have to continually accommodate more and more load from our environment as it ages.
 
 ## The "Prototype Pattern"
 
