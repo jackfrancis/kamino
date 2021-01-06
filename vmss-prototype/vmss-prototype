@@ -14,7 +14,7 @@ import sys
 import time
 
 # This is what hooks to the Python bash autocomplete
-import argcomplete # type: ignore
+import argcomplete  # type: ignore
 
 
 def fatal_error(msg):
@@ -706,10 +706,9 @@ def vmss_prototype_update(sub_args):
                                    ], retries=6)
                 snapshot = json.loads(output)
 
-                # Start it up again now that we have the snapshot
-                # We ignore errors here since it is possible that
-                # someone deleted the VM after the snapshot
-                run(az(['vmss', 'start'], subscription) + [
+                # Delete the instance to prevent idns side-effects from future VMs coming online based on its prototype
+                # See https://github.com/jackfrancis/kamino/issues/26
+                run(az(['vmss', 'delete-instances'], subscription) + [
                     '--resource-group', resource_group,
                     '--name', vmss,
                     '--instance-ids', instance_id,
@@ -830,6 +829,25 @@ def vmss_prototype_update(sub_args):
                 '--name', extension['name']
                 ], retries=3, check=False, retry_func=not_found_no_retry)
 
+    # Scale out 1 more VMSS instance to replace the previously deleted instance
+    # Note: this does not respect any changes that may have occured to the VMSS instance count during update
+    # from out-of-band node scaling tools such as cluster-autoscaler
+    output, _, _ = run(az(['vmss', 'show'], subscription) + [
+                       '--resource-group', resource_group,
+                       '--name', vmss
+                       ], retries=3)
+    vmss_info = json.loads(output)
+    capacity = vmss_info["sku"]["capacity"]
+    if isinstance(capacity, int):
+        # Increase the capacity of the VMSS by 1
+        run(az(['vmss', 'update'], subscription) + [
+            '--resource-group', resource_group,
+            '--name', vmss,
+            '--set',
+                'sku.capacity={}'.format(capacity + 1),
+            ], retries=3, check=False)
+    else:
+        logging.warning('Unable to determine capacity for VMSS {}, will not add back 1 instance'.format(vmss)
 
 def in_cluster(sub_args, func):
     '''
