@@ -829,25 +829,26 @@ def vmss_prototype_update(sub_args):
                 '--name', extension['name']
                 ], retries=3, check=False, retry_func=not_found_no_retry)
 
-    # Scale out 1 more VMSS instance to replace the previously deleted instance
-    # Note: this does not respect any changes that may have occured to the VMSS instance count during update
-    # from out-of-band node scaling tools such as cluster-autoscaler
-    output, _, _ = run(az(['vmss', 'show'], subscription) + [
-                       '--resource-group', resource_group,
-                       '--name', vmss
-                       ], retries=3)
-    vmss_info = json.loads(output)
-    capacity = vmss_info["sku"]["capacity"]
-    if isinstance(capacity, int):
-        # Increase the capacity of the VMSS by 1
-        run(az(['vmss', 'update'], subscription) + [
-            '--resource-group', resource_group,
-            '--name', vmss,
-            '--set',
-                'sku.capacity={}'.format(capacity + 1),
-            ], retries=3, check=False)
-    else:
-        logging.warning('Unable to determine capacity for VMSS {}, will not add back 1 instance'.format(vmss)
+    if sub_args.new_updated_nodes > 0:
+        # Scale out 1 more VMSS instance to replace the previously deleted instance
+        # Note: this does not respect any changes that may have occured to the VMSS instance count during update
+        # from out-of-band node scaling tools such as cluster-autoscaler
+        output, _, _ = run(az(['vmss', 'show'], subscription) + [
+                        '--resource-group', resource_group,
+                        '--name', vmss
+                        ], retries=3)
+        vmss_info = json.loads(output)
+        capacity = lookup_one_value(vmss_info,'sku.capacity')
+        if capacity != None:
+            # Increase the capacity of the VMSS by the value of --new-updated-nodes
+            run(az(['vmss', 'update'], subscription) + [
+                '--resource-group', resource_group,
+                '--name', vmss,
+                '--set',
+                    'sku.capacity={0}'.format(capacity + sub_args.new_updated_nodes),
+                ], retries=3, check=False)
+        else:
+            logging.warning('Unable to determine capacity for VMSS {0}, will not add back 1 instance'.format(vmss))
 
 def in_cluster(sub_args, func):
     '''
@@ -952,6 +953,16 @@ def NodeName(v):
         raise argparse.ArgumentTypeError("Node name must be a vmss node:  eg k8s-pool-131414-vmss0003ax")
     return v
 
+def NewUpdatedNodes(v):
+    """
+    new-updated-nodes validation type for argparser
+    :param v: The proposed new-updated-nodes value
+    :return: The validated new-updated-nodes
+    """
+    if not isinstance(v, int):
+        raise argparse.ArgumentTypeError("new-updated-nodes must be an int:  eg 1")
+    return v
+
 
 def SubscriptionId(v):
     """
@@ -1016,6 +1027,8 @@ def register_commands(subparser):
                          description='Set up new/updated prototype')
     parser.add_argument('--target-node', required=True, type=NodeName,
                         help='Target node to use as the prototype source')
+    parser.add_argument('--new-updated-nodes', default=0, type=NewUpdatedNodes,
+                        help='Number of new nodes to add to the cluster after the VMSS has been updated from the prototype node (default: %(default)s)')
     parser.add_argument('--max-history', default=3, type=HistorySize,
                         help='Number of entries to keep in history - minimum is 2 - (default: %(default)s)')
     parser.add_argument('--grace-period', type=int, default=300,

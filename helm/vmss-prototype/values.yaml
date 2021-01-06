@@ -48,6 +48,8 @@ kamino:
   # automatically
   #targetNode: k8s-agentpool1-12345678-vmss0001ct
 
+  # Set newUpdatedNodes to a higher value to immediately add more nodes built from the prototype after VMSS update is complete
+  newUpdatedNodes: 0
   # Require scheduling the pod onto a control plane VM using the AKS Engine control plane VM identifier
   # Default to false, which allows scheduling on any node other than the targetNode
   scheduleOnControlPlane: false
