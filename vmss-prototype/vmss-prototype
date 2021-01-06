@@ -838,10 +838,11 @@ def vmss_prototype_update(sub_args):
                         '--name', vmss
                         ], retries=3)
         vmss_info = json.loads(output)
-        capacity = lookup_one_value(vmss_info,'sku.capacity')
+        capacity = lookup_one_value(vmss_info, 'sku.capacity')
         if capacity != None:
             # Increase the capacity of the VMSS by the value of --new-updated-nodes
             run(az(['vmss', 'update'], subscription) + [
+                "--no-wait",
                 '--resource-group', resource_group,
                 '--name', vmss,
                 '--set',
