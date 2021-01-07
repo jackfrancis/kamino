@@ -842,11 +842,11 @@ def vmss_prototype_update(sub_args):
         if capacity != None:
             # Increase the capacity of the VMSS by the value of --new-updated-nodes
             run(az(['vmss', 'update'], subscription) + [
-                "--no-wait",
                 '--resource-group', resource_group,
                 '--name', vmss,
                 '--set',
                     'sku.capacity={0}'.format(capacity + sub_args.new_updated_nodes),
+                "--no-wait",
                 ], retries=3, check=False)
         else:
             logging.warning('Unable to determine capacity for VMSS {0}, will not add back 1 instance'.format(vmss))
