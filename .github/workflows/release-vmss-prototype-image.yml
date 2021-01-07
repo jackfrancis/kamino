@@ -2,7 +2,7 @@ name: Release vmss-prototype image
 on:
   push:
     tags:
-      - 'image-v*' # push events for tags matching image-v for version (image-v1.0, etc)
+      - 'vmss-prototype-image-v*' # push events for tags matching image-v for version (image-v1.0, etc)
 jobs:
   image:
     runs-on: ubuntu-latest
