@@ -65,7 +65,7 @@ spec:
             - update
             - --target-node
             - {{ .Values.kamino.targetNode | quote }}
-            -- new-updated-nodes
+            - --new-updated-nodes
             - {{ .Values.kamino.newUpdatedNodes | quote }}
             - --grace-period
             - {{ required "missing required kamino.drain.gracePeriod" .Values.kamino.drain.gracePeriod | quote }}

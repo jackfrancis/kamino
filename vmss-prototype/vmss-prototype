@@ -960,7 +960,11 @@ def NewUpdatedNodes(v):
     :param v: The proposed new-updated-nodes value
     :return: The validated new-updated-nodes
     """
-    if not isinstance(v, int) or v < 0:
+    if isinstance(v, string):
+        if not v.isdigit():
+            raise argparse.ArgumentTypeError("new-updated-nodes must be a positive int: eg 1")
+    v = int(v)
+    if v < 0:
         raise argparse.ArgumentTypeError("new-updated-nodes must be a positive int: eg 1")
     return v
 
