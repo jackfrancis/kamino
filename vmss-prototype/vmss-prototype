@@ -846,7 +846,7 @@ def vmss_prototype_update(sub_args):
                 '--name', vmss,
                 '--set',
                     'sku.capacity={0}'.format(capacity + sub_args.new_updated_nodes),
-                "--no-wait",
+                "--no-wait"
                 ], retries=3, check=False)
         else:
             logging.warning('Unable to determine capacity for VMSS {0}, will not add back 1 instance'.format(vmss))
