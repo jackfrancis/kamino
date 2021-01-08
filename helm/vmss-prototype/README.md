@@ -1,6 +1,6 @@
 # vmss-prototype
 
-`vmss-prototype` takes a snapshot of the OS image from one instance in your VMSS node pool, and then updates the VMSS model definition so that future instances use that image snapshot.
+`vmss-prototype` takes a snapshot of the OS image from one instance in your VMSS node pool, and then updates the VMSS model definition so that future instances (nodes) use that image snapshot.
 
 This simple concept can dramatically improve node scaling response time and reliability:
 
@@ -12,7 +12,7 @@ This simple concept can dramatically improve node scaling response time and reli
 Below is the canonical way to run vmss-prototype on your cluster using our published Helm Chart:
 
 ```bash
-$ helm --install --repo https://jackfrancis.github.io/kamino/ vmss-prototype \
+$ helm install --repo https://jackfrancis.github.io/kamino/ vmss-prototype \
   update-vmss-model-image-from-instance-0 --namespace default \
   --set kamino.scheduleOnControlPlane=true \
   --set kamino.targetNode=k8s-pool1-12345678-vmss000000
@@ -22,12 +22,14 @@ $ helm --install --repo https://jackfrancis.github.io/kamino/ vmss-prototype \
 
 `vmss-prototype` assumes a few things about the way your cluster has been built:
 
-- It expects an Azure cloud provider config file at the path `/etc/kubernetes/azure.json` on the node VM that the job's pod is scheduled onto (in the above example we instruct Helm to create a job named "update-vmss-model-image-from-instance-0").
-  - Or, it expects the control plane to be MSI-enabled using system-assigned identity, and to be invoked via `helm install` using the `--set kamino.scheduleOnControlPlane=true` option.
+- It expects an Azure cloud provider config file at the path `/etc/kubernetes/azure.json` on the node VM that the job's pod is scheduled onto (in the above example we instruct Helm to create a release, and ultimately a job resource, both named "update-vmss-model-image-from-instance-0").
+- If you invoke the `helm install` command using the `--set kamino.scheduleOnControlPlane=true` option, it expects that the control plane nodes respond to the "`kubernetes.io/role: master`" nodeSelector.
+  - If you do *not* invoke the `--set kamino.scheduleOnControlPlane=true` option, it expects at least 2 nodes to be running in your cluster, as the `vmss-prototype` pod will not be scheduled onto the target node itself (because the target node is removed from the cluster in order to create a snapshot)
 - It expects the targetNode to be a Linux node (no Windows node support).
 - It expects that the set of systemd service definitions (kublet, containerd|docker, etc) to be implemented generically with respect to the underlying hostname. In other words, it expects that there are no static references to a very particular hostname string, but instead all local references will derive from a runtime reference equivalent to `$(hostname)`.
 - It expects the Kubernetes application layer (i.e., kubelet) to defer to the network stack for IP address information — i.e., it expects no static IP configuration to be present.
 - It expects the Azure VMSS definition to have a "DHCP-like" network configuration for instances as they are created; again, no static IP address configurations.
+- It expects that when a new VM built with this image snapshot will be pre-configured to run the necessary Kubernetes node runtime (kublet) automatically, and join the cluster without any additional bootstrap scripts. This requirement is owing to the fact that cloud-init and any CustomScriptExtensions attached to the VMSS model definition are removed during the `vmss-prototype` process. These are removed by design, to optimize the node join process by removing unnecessary (all Kubernetes runtime configuration has already been applied) boot cycle friction.
 
 The above details reflect operational configurations produced by a Kubernetes + Azure cluster created with the [AKS Engine](https://github.com/Azure/aks-engine) tool. As of this writing, AKS Engine-created clusters are the only validated, known-working Azure Kubernetes cluster "flavor"; strictly speaking, so long as the above set of cluster configuration requirements are met, any Kubernetes cluster's VMSS nodes running on Azure may take advantage of `vmss-prototype`.
 
@@ -70,7 +72,7 @@ The `vmss-prototype` operation carries out a procedural set of steps, each of wh
 8. Cordon + drain the target node in preparation for taking it offline. If the cordon + drain fails, we will fail the operation _unless we pass in the `--force` option to the `vmss-prototype` tool (see the Helm Chart usage of `kamino.drain.force` below)_.
 9. Deallocate the VMSS instance. This is a fancy, Azure-specific way of saying that we release the reservation of the underlying compute hardware running that instance virtual machine. This is a pre-condition to performing a snapshot of the underlying disk.
 10. Make a snapshot of the OS disk image attached to the deallocated VMSS instance.
-11. Re-start up the VMSS instance. Now that we've taken a snapshot of the disk, there's no longer a need for this node to be out of service.
+11. *Permanently delete the VMSS instance.* This is due to an [open issue](https://github.com/jackfrancis/kamino/issues/26). Long-term, we aim to solve that issue and simply re-introduce the snapshotted node back into the cluster. In the meanwhile, one operational side-effect of `vmss-prototype` is the loss of one node in the node pool. If you wish to re-add one node after `vmss-prototype` has completed updating the VMSS model, you may use the `--set kamino.newUpdatedNodes=1` option when invoking `helm install`.
 12. Uncordon the node to allow Kubernetes to schedule workloads onto it.
 13. Remove the `cluster-autoscaler.kubernetes.io/scale-down-disabled` cluster-autoscaler node annotation as we no longer care if this node is chosen for removal by cluster-autoscaler.
 14. Build a new SIG Image Definition _version_ (i.e., the actual image we're going to update the VMSS to use) from the recently captured snapshot image. This takes a long time! In our tests we see a 30 GB image (the OS disk size default for many Linux distros) take between 30 minutes and 2 _hours_ to be rendered as a SIG Image Definition version!
@@ -105,6 +107,10 @@ The following Helm Chart values are exposed to configure a `vmss-prototype` rele
   - e.g., `--set kamino.scheduleOnControlPlane=true`
   - Instructs the Kubernetes scheduler to require a control plane VM to execute the pod container on. If you're running a cluster configuration that doesn't have a `/etc/kubernetes/azure.json` with an Azure service principle configuration that permits the creation of resources in the cluster resource group, or if you're running in an MSI (system- or user-assigned identity) configuration which grants only control plane VMs a "Contributor" role assignment (but not worker node VMs), then you must use this. tl;dr this is a configuration which should work for almost all clusters (control plane VMs will *always* have the appropriate privileges in the cluster resource group), but in practice we default to `false` under the assumption that enough folks prefer _not_ to schedule anything on control plane VMs.
 
+- `kamino.newUpdatedNodes` (default value is `0`)
+  - e.g., `--set kamino.newUpdatedNodes=1`
+  - Immediately add nodes to the cluster in the updated node pool after `vmss-prototype` has successfully updated the VMSS model based on the target node's OS image.
+
 - `kamino.imageHistory` (default value is `3`)
   - e.g., `--set kamino.imageHistory=5`
   - Override the default if you wish to retain more or fewer Shared Image Gallery OS snapshot images in the VMSS-specific SIG Image Definition created by `vmss-prototype`. One SIG per VMSS will be created by `vmss-prototype`; invoking a custom value of `imageHistory` during a run of `vmss-prototype` will inform how many, if any, existing SIG images in that VMSS-specific SIG Image Definition to prune.
@@ -112,6 +118,7 @@ The following Helm Chart values are exposed to configure a `vmss-prototype` rele
 - `kamino.drain.gracePeriod` (default value is `300`)
   - e.g., `--set kamino.drain.gracePeriod=60`
   - Override the default if you wish to allow more or less time for the pods running on the node to gracefully exit. This is directly equivalent to the `--grace-period` flag of the `kubectl drain` CLI operation
+
 - `kamino.drain.force` (default value is `false`)
   - e.g., `--set kamino.drain.force=true`
   - Override the default if you wish to force a drain even if the grace period has expired, or if there are non-replicated pods (e.g., not part of a ReplicationController, ReplicaSet [i.e., Deployment], DaemonSet, StatefulSet or Job). This is directly equivalent to the `--force` flag of the `kubectl drain` CLI operation
