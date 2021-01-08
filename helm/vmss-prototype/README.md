@@ -22,7 +22,7 @@ $ helm install --repo https://jackfrancis.github.io/kamino/ vmss-prototype \
 
 `vmss-prototype` assumes a few things about the way your cluster has been built:
 
-- It expects an Azure cloud provider config file at the path `/etc/kubernetes/azure.json` on the node VM that the job's pod is scheduled onto (in the above example we instruct Helm to create a job named "update-vmss-model-image-from-instance-0").
+- It expects an Azure cloud provider config file at the path `/etc/kubernetes/azure.json` on the node VM that the job's pod is scheduled onto (in the above example we instruct Helm to create a release, and ultimately a job resource, both named "update-vmss-model-image-from-instance-0").
 - If you invoke the `helm install` command using the `--set kamino.scheduleOnControlPlane=true` option, it expects that the control plane nodes respond to the "`kubernetes.io/role: master`" nodeSelector.
   - If you do *not* invoke the `--set kamino.scheduleOnControlPlane=true` option, it expects at least 2 nodes to be running in your cluster, as the `vmss-prototype` pod will not be scheduled onto the target node itself (because the target node is removed from the cluster in order to create a snapshot)
 - It expects the targetNode to be a Linux node (no Windows node support).
