@@ -26,8 +26,9 @@ We encourage folks who are using the above stated, known-working Kubernetes + Az
 The kamino project publishes a Helm Chart called "vmss-prototype". You may use that Chart to take a snapshot of the OS image from one instance in your VMSS node pool, and then update the VMSS model definition so that future instances (nodes) use that image snapshot. For example:
 
 ```bash
-$ helm install --repo https://jackfrancis.github.io/kamino/ vmss-prototype \
-  update-vmss-model-image-from-instance-0 --namespace default \
+$ helm install --repo https://jackfrancis.github.io/kamino/ \
+  update-vmss-model-image-from-instance-0 \
+  vmss-prototype --namespace default \
   --set kamino.scheduleOnControlPlane=true \
   --set kamino.targetNode=k8s-pool1-12345678-vmss000000
 ```
@@ -44,6 +45,7 @@ If you're not familiar with using `helm` tool to manage Kubernetes resource depl
 
 - https://helm.sh/docs/intro/quickstart/
 
+A complete walkthrough of using `vmss-prototype` on a cluster is [here][vmss-prototype-walkthrough].
 More detailed information on `vmss-prototype` is [here][vmss-prototype].
 
 # Documentation
@@ -52,4 +54,5 @@ All [documentation can be found here][docs].
 
 [docs]: docs/README.md
 [status]: docs/status.md
+[vmss-prototype-walkthrough]: helm/vmss-prototype/walkthrough.md
 [vmss-prototype]: helm/vmss-prototype/README.md
