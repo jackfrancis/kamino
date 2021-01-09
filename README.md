@@ -46,6 +46,7 @@ If you're not familiar with using `helm` tool to manage Kubernetes resource depl
 - https://helm.sh/docs/intro/quickstart/
 
 A complete walkthrough of using `vmss-prototype` on a cluster is [here][vmss-prototype-walkthrough].
+
 More detailed information on `vmss-prototype` is [here][vmss-prototype].
 
 # Documentation

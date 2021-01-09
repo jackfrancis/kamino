@@ -19,6 +19,8 @@ $ helm install --repo https://jackfrancis.github.io/kamino/ \
   --set kamino.targetNode=k8s-pool1-12345678-vmss000000
 ```
 
+A complete walkthrough of using `vmss-prototype` on a cluster is [here](walkthrough.md).
+
 ## Cluster Configuration Requirements before using
 
 `vmss-prototype` assumes a few things about the way your cluster has been built:
