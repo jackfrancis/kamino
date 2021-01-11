@@ -1,6 +1,6 @@
 # vmss-prototype walkthrough
 
-This walkthrough will demonstrate a concrete operational session that employs `vmss-prototype` to freshen the OS configuration on a node pool. This solution scales nicely, although we hope that demonstrating on a 10 node pool is sufficient to suggest the value of more rapidly, reliably freshening large (> 100 nodes) clusters.
+This walkthrough will demonstrate a concrete operational session that employs `vmss-prototype` to freshen the OS configuration on a node pool. This solution scales nicely, and we hope that demonstrating on a 10 node pool is sufficient to suggest the value of being able to more rapidly, reliably freshen large (> 100 nodes) clusters.
 
 Initially, let's take a look at our example cluster:
 
@@ -20,7 +20,7 @@ k8s-agentpool1-26100436-vmss000009   Ready    agent    2m6s    v1.20.1   10.240.
 k8s-master-26100436-0                Ready    master   2m40s   v1.20.1   10.255.255.5   <none>        Ubuntu 18.04.5 LTS   5.4.0-1032-azure   docker://19.3.14
 ```
 
-By logging onto one of the nodes, I can see that there are several security patches needed (by convention AKS Engine builds clusters with a ssh NAT path to the "first"):
+By logging onto one of the nodes, I can see that there are several security patches needed:
 
 ```sh
 $ ssh k8s-agentpool1-26100436-vmss000000
@@ -175,7 +175,7 @@ azureuser@k8s-agentpool1-26100436-vmss000000:~$ cat /var/run/reboot-required
 *** System restart required ***
 ```
 
-So, let's cordon + drain that node from the cluster...:
+Now, in order to actually apply these updates on this node, let's cordon + drain it from the cluster...:
 
 ```sh
 $ k cordon k8s-agentpool1-26100436-vmss000000
@@ -291,7 +291,7 @@ $ k get node k8s-agentpool1-26100436-vmss000000
 Error from server (NotFound): nodes "k8s-agentpool1-26100436-vmss000000" not found
 ```
 
-It takes a long time (between 30 mins and 2 hours) to create and replicate a new Shared Image Gallery Image (which is the resource type we use to re-use the OS image snapshot across future VMSS instances). Take a break and relax. Eventually, the entire progression of `vmss-prototype` can be viewd via the pod logs:
+It takes a long time (between 30 mins and 2 hours) to create and replicate a new Shared Image Gallery Image (which is the resource type we use to re-use the OS image snapshot across future VMSS instances). Take a break and relax. Eventually, the entire progression of `vmss-prototype` can be viewed via the pod logs:
 
 ```sh
 $ k logs kamino-gen-k8s-agentpool1-26100436-vmss-l4gzw -f
@@ -451,13 +451,13 @@ WARNING: apt does not have a stable CLI interface. Use with caution in scripts.
 ls: cannot access '/var/log/vmss-prototype-was-here': No such file or directory
 ```
 
-Just to prove that independent of having to invoke a helm release of `vmss-prototype` we've meaningfully updated the VMSS model for this node pool, let's do a simple scale out by one. There are many ways to do this, we'll demonstrate using the `az` command line. Recall that we originally begun this exercise on a cluster with a VMSS node pool of 10 nodes. We then installed a release of `vmss-prototype` via helm using the `--set kamino.newUpdatedNodes=10` option. During that job we lost one node (the target node, in order to deallocation and grab a snapshot of its OS disk image), and then added 10 more. Which means we now have 19. So we'll set the VMSS capacity to 20 to increase the count by 1:
+Just to prove that we've meaningfully updated the VMSS model for this node pool for future scale out operations, let's do a simple scale out by one. There are many ways to do this; we'll demonstrate using the `az` command line. Recall that we originally begun this exercise on a cluster with a VMSS node pool of 10 nodes. We then installed a release of `vmss-prototype` via helm using the `--set kamino.newUpdatedNodes=10` option. During the execution of that `vmss-prototype` job we lost one node (the target node, in order to deallocation and grab a snapshot of its OS disk image), and then added 10 more. Which means we now have 19. So we'll set the VMSS capacity to 20 to increase the count by 1:
 
 ```sh
 $ az vmss update --resource-group kubernetes-westus2-17813 --name k8s-agentpool1-26100436-vmss --set sku.capacity=20 --no-wait
 ```
 
-(Again, we're using the name of the resource group, and of the VMSS, that happen to be present in the example cluster here.)
+(Again, we're using the name of the resource group, and of the VMSS, that happen to represent the example cluster here.)
 
 By waiting for the node to arrive, we can easily identify it:
 
@@ -490,7 +490,7 @@ k8s-agentpool1-26100436-vmss00000k   NotReady   <none>   0s     v1.20.1   10.240
 k8s-agentpool1-26100436-vmss00000k   Ready      <none>   10s    v1.20.1   10.240.2.111   <none>        Ubuntu 18.04.5 LTS   5.4.0-1036-azure   docker://19.3.14
 ```
 
-That `k`-suffixed node is our mark! Let's validate that it has all the OS updates and sentinel file we're using to positively identify nodes built from the prototype of the original target node:
+That "`k`"-suffixed node is our mark! Let's validate that it has all the OS updates and sentinel file we're using to positively identify nodes built from the prototype of the original target node:
 
 ```sh
 $ ssh k8s-agentpool1-26100436-vmss00000k "sudo apt list --upgradable | wc -l && ls -la /var/log/vmss-prototype-was-here"
@@ -549,7 +549,7 @@ pod/metrics-server-6c8cc7585b-fvm5f evicted
 node/k8s-agentpool1-26100436-vmss000009 evicted
 ```
 
-Note: this particular recipe for "removing 9 nodes from a cluster" is intentionally simplified. There are manifold strategies to do such an operation. In addition, adding 10 (via the `vmss-prototype` helm release) all of the sudden is not at all the right strategy for all cluster scenarios in terms of implementing a "rolling replacement" of "old" with "new" nodes. Hopefully these concrete examples inspire you to implement your own operational gestures appropriate for your environment.
+Note: this particular recipe for "removing 9 nodes from a cluster and migrating its workloads onto new nodes" is intentionally simplified. There are manifold strategies to do such an operation. In addition, adding 10 (via the `vmss-prototype` helm release) all of the sudden is not necessarily the right strategy for all cluster scenarios in terms of implementing a "rolling replacement" of "old" with "new" nodes. Hopefully these concrete examples inspire you to implement your own operational gestures appropriate for your environment.
 
 In any event, we should now see that these 9 nodes are no longer actively participating in the cluster:
 
