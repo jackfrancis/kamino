@@ -1252,8 +1252,8 @@ def register_commands(subparser):
 
     parser = add_command(subparser, "auto-update", func=vmss_prototype_auto_update,
                          description='Automatically set up new/updated prototype if needed')
-    parser.add_argument('--running-on-node', default=None, type=str,
-                        help='The name of the node this is running on such that it can be skipped')
+    parser.add_argument('--running-on-node', default=os.getenv('NODE_ID', None), type=str,
+                        help='The name of the node this is running on such that it can be skipped (default: %(default)s)')
     parser.add_argument('--target-vmss', action='append', nargs='+', type=VmssName,
                         help='Target VMSS pools (all if not given)')
     parser.add_argument('--pending-reboot-annotation', required=True, type=str,
