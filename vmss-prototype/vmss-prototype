@@ -1216,7 +1216,7 @@ def add_command(subparsers, command, func, description=None):
 
     # We need the resource group of the cluster.  When --in-cluster, this is
     # discovered from the azure.json cluster definition file on the node
-    parser.add_argument("-g", "--resource-group", default=None,
+    parser.add_argument("-g", "--resource-group", default=None, type=str,
                         help="Name of the resource group the cluster is in (required if not --in-cluster)")
 
     # We take a subscription in case the user has access to more than one in the
@@ -1225,6 +1225,28 @@ def add_command(subparsers, command, func, description=None):
     parser.add_argument("-s", "--subscription", default=None, type=SubscriptionId,
                         help="The subscription guid for the cluster's resource group (required if not --in-cluster)")
 
+    return parser
+
+
+def add_update_command(subparsers, command, func, description=None):
+    """
+    Add an update command to the command parsers with the given function
+    and description with the common arguments needed
+    :param subparsers: The subparsers to add the command to
+    :param command: The command text
+    :param func: The function to call for this command
+    :param description: The optional description
+    :return: The parser for the command that was added
+    """
+    parser = add_command(subparsers, command, func, description=description)
+    parser.add_argument('--new-updated-nodes', default=0, type=NewUpdatedNodes,
+                        help='Number of new nodes to add to the cluster after the VMSS has been updated from the prototype node (default: %(default)s)')
+    parser.add_argument('--max-history', default=3, type=HistorySize,
+                        help='Number of entries to keep in history - minimum is 2 - (default: %(default)s)')
+    parser.add_argument('--grace-period', type=int, default=300,
+                        help='Grace period in seconds for drain (default: %(default)s)')
+    parser.add_argument('--force', default=False, action='store_true',
+                        help='Force using target node even if drain fails')
     return parser
 
 
@@ -1237,23 +1259,13 @@ def register_commands(subparser):
     parser = add_command(subparser, "status", func=vmss_prototype_status,
                          description='Show status of VMSS Prototype Pattern')
 
-    parser = add_command(subparser, "update", func=vmss_prototype_update,
-                         description='Set up new/updated prototype')
+    parser = add_update_command(subparser, "update", func=vmss_prototype_update,
+                                description='Set up new/updated prototype')
     parser.add_argument('--target-node', required=True, type=NodeName,
                         help='Target node to use as the prototype source')
-    parser.add_argument('--new-updated-nodes', default=0, type=NewUpdatedNodes,
-                        help='Number of new nodes to add to the cluster after the VMSS has been updated from the prototype node (default: %(default)s)')
-    parser.add_argument('--max-history', default=3, type=HistorySize,
-                        help='Number of entries to keep in history - minimum is 2 - (default: %(default)s)')
-    parser.add_argument('--grace-period', type=int, default=300,
-                        help='Grace period in seconds for drain (default: %(default)s)')
-    parser.add_argument('--force', default=False, action='store_true',
-                        help='Force using target node even if drain fails')
 
-    parser = add_command(subparser, "auto-update", func=vmss_prototype_auto_update,
-                         description='Automatically set up new/updated prototype if needed')
-    parser.add_argument('--running-on-node', default=os.getenv('NODE_ID', None), type=str,
-                        help='The name of the node this is running on such that it can be skipped (default: %(default)s)')
+    parser = add_update_command(subparser, "auto-update", func=vmss_prototype_auto_update,
+                                description='Automatically set up new/updated prototype if needed')
     parser.add_argument('--target-vmss', action='append', nargs='+', type=VmssName,
                         help='Target VMSS pools (all if not given)')
     parser.add_argument('--pending-reboot-annotation', required=True, type=str,
@@ -1266,14 +1278,8 @@ def register_commands(subparser):
                         help='Minimum time a node must in ready state before it is considered a candidate (default %(default)s)')
     parser.add_argument('--minimum-candidates', default=1, type=MinimumCandidates,
                         help='Minimum number of acceptable candidates (default: %(default)s)')
-    parser.add_argument('--new-updated-nodes', default=0, type=NewUpdatedNodes,
-                        help='Number of new nodes to add to the cluster after the VMSS has been updated from the prototype node (default: %(default)s)')
-    parser.add_argument('--max-history', default=3, type=HistorySize,
-                        help='Number of entries to keep in history - minimum is 2 - (default: %(default)s)')
-    parser.add_argument('--grace-period', type=int, default=300,
-                        help='Grace period in seconds for drain (default: %(default)s)')
-    parser.add_argument('--force', default=False, action='store_true',
-                        help='Force using target node even if drain fails')
+    parser.add_argument('--running-on-node', default=os.getenv('NODE_ID', None), type=str,
+                        help='The name of the node this is running on such that it can be skipped (default: %(default)s)')
 
 
 def set_better_help(sub_parser):
