@@ -11,6 +11,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 
 # This is what hooks to the Python bash autocomplete
@@ -235,21 +236,30 @@ def get_nodes():
     return nodes.split()
 
 
+def is_vmss_name(vmss_name):
+    """
+    Returns true of the name is a valid vmss name
+    :param vmss_name: A valid vmss name
+    :return: True if name is a valid vmss
+    """
+    return re.match(r'^\S+-vmss$', vmss_name) is not None
+
+
 def is_vmss_node(node_name):
-    '''
+    """
     Returns true of the node name is a valid vmss node name
     :param node_name: A valid vmss node name
     :return: True if node is valid vmss node
-    '''
+    """
     return re.match(r'^\S+-vmss[0-9a-z]{6}$', node_name) is not None
 
 
 def node_to_vmss(node_name):
-    '''
+    """
     Convert node name to VMSS name
     :param node_name: A valid vmss node name
     :return: The name of the vmss
-    '''
+    """
     return re.sub(r'-vmss[0-9a-z]{6}$', r'-vmss', node_name)
 
 
@@ -312,12 +322,12 @@ def lookup_one_value(value_dict, value_arg):
 
 
 def az(cmd, subscription=None):
-    '''
+    """
     Build the az command with optional subscription
     :param cmd: The AZ command as a list of words
     :param subscription: Optional subscription upon which to scope the command
     :return: A list of the first part of the command
-    '''
+    """
     az_cmd = ['az'] + cmd
     if subscription:
         az_cmd += ['--subscription', subscription]
@@ -325,16 +335,32 @@ def az(cmd, subscription=None):
 
 
 def not_found_no_retry(_stdout, stderr, _exit_code):
-    '''
+    """
     We need this function for the retry_func in a number of places
     It stops the retries if a NotFound is the reason for the failure
     :param _stdout: The stdout of the failed command (not used)
     :param stderr: The stderr of the failed command (used)
     :param _exit_code: The exit_code of the command (not used)
     :return: True if we should retry, False if not
-    '''
+    """
     # Return False if we have any kind of 'NotFound'
     return 'NotFound' not in stderr
+
+
+def get_vmss_images(subscription, resource_group, sig_name, image_definition):
+    """
+    Get the list of image versions for this given VMSS or None if none exist
+    :return: A list of available versions
+    """
+    output, _, rc = run(az(['sig', 'image-version', 'list'], subscription) + [
+                        '--resource-group', resource_group,
+                        '--gallery-name', sig_name,
+                        '--gallery-image-definition', image_definition
+                        ], retries=3, check=False, retry_func=not_found_no_retry)
+    if rc != 0:
+        return None
+
+    return json.loads(output)
 
 
 def vmss_prototype_collect_status(sub_args):
@@ -370,18 +396,13 @@ def vmss_prototype_collect_status(sub_args):
 
         image_def = json.loads(output)
 
-        output, _, rc = run(az(['sig', 'image-version', 'list'], subscription) + [
-                            '--resource-group', resource_group,
-                            '--gallery-name', sig_name,
-                            '--gallery-image-definition', image_definition
-                            ], retries=3, check=False, retry_func=not_found_no_retry)
-        if rc != 0:
-            yield '{0}: {1}: Failed to get Kamino VMSS Prototype Image Definition Versions'.format(sub_args.resource_group, vmss)
+        versions = get_vmss_images(subscription, resource_group, sig_name, image_definition)
+        if not versions:
+            yield '{0}: {1}: Failed to get Kamino VMSS Prototype Image Definition Versions'.format(resource_group, vmss)
             continue
 
-        versions = json.loads(output)
         if len(versions) < 1:
-            yield '{0}: {1}: No Kamino VMSS Prototype Image Definition Versions'.format(sub_args.resource_group, vmss)
+            yield '{0}: {1}: No Kamino VMSS Prototype Image Definition Versions'.format(resource_group, vmss)
             continue
 
         output, _, _ = run(az(['vmss', 'show'], subscription) + [
@@ -666,7 +687,7 @@ def vmss_prototype_update(sub_args):
                                 '--grace-period', sub_args.grace_period,
                                 '--timeout', '{0}s'.format(sub_args.grace_period * 3),
                                 target_node
-                                ], check=False, retries=2, log_timing=True, timeout=60 + sub_args.grace_period * 9)
+                                ], check=False, retries=3, log_timing=True, timeout=60 + sub_args.grace_period * 9)
 
                 if rc != 0:
                     if not sub_args.force:
@@ -851,13 +872,148 @@ def vmss_prototype_update(sub_args):
         else:
             logging.warning('Unable to determine capacity for VMSS {0}, will not add back 1 instance'.format(vmss))
 
+
+def vmss_prototype_auto_update(sub_args):
+    """
+    Auto update the VMSS (or set of VMSS) in the cluster if needed and ready
+    :param sub_args: The command line arguments
+    """
+    subscription = sub_args.subscription
+    resource_group = sub_args.resource_group
+    sig_name = get_vmss_sig(resource_group)
+
+    if sub_args.target_vmss:
+        vmss_names = sorted(set([name for names in sub_args.target_vmss for name in names]))
+    else:
+        # Get all of the VMSSes in this cluster
+        vmss_names = get_vmss_set()
+
+    # Get the set of unique annotations that would trigger a skip
+    node_skip_annotations = set([name for names in sub_args.node_skip_annotation for name in names]) if sub_args.node_skip_annotation else set()
+
+    # Get the total node data such that we can make some judgements as to fitness
+    all_nodes_json, _, _ = run(['kubectl', 'get', 'nodes',
+                                '--output', 'json'
+                                ], retries=3)
+
+    nodes = json.loads(all_nodes_json)['items']
+
+    for vmss in vmss_names:
+        # The VMSS specific image definition name
+        image_definition = get_sig_image_def(vmss)
+
+        versions = get_vmss_images(subscription, resource_group, sig_name, image_definition)
+        # If we don't have one, any version is newer than this :-)
+        latest_image = '0000.00.00'
+        if versions:
+            for version in versions:
+                if version['name'] > latest_image:
+                    latest_image = version['name']
+        logging.debug('Latest image for VMSS {0} is {1}'.format(vmss, latest_image))
+
+        potential_nodes = []
+        for node in nodes:
+            metadata = node.get('metadata', {})
+            # If not a node in target VMSS, continue...
+            node_name = metadata.get('name', 'unknown')
+            if vmss not in node_name:
+                logging.debug('SKIP: Node {0} not part of vmss {1}'.format(node_name, vmss))
+                continue
+
+            if node_name == sub_args.running_on_node:
+                logging.debug('SKIP: Node {0} is the same as the node we are running on')
+                continue
+
+            annotations = metadata.get('annotations', {})
+            skip = False
+            for skip_annotation in node_skip_annotations:
+                if skip_annotation in annotations:
+                    logging.debug('SKIP: Node {0} is annotated as needing to be skipped: {1}'.format(node_name, skip_annotation))
+                    skip = True
+                    break
+            if skip:
+                continue
+
+            if sub_args.pending_reboot_annotation in annotations:
+                logging.debug('SKIP: Node {0} is annotated as pending reboot: {1}'.format(node_name, sub_args.pending_reboot_annotation))
+                continue
+
+            last_patch = annotations.get(sub_args.last_patch_annotation, None)
+            if not last_patch:
+                logging.debug('SKIP: Node {0} does not have a last patch annotation: {1}'.format(node_name, sub_args.last_patch_annotation))
+                continue
+
+            last_patch_date_match = re.search(r'\d\d\d\d-\d\d-\d\d', last_patch)
+            if not last_patch_date_match:
+                logging.debug('SKIP: Node {0} last patch annotation does not have a valid format: {1}={2}'.format(node_name, sub_args.last_patch_annotation, last_patch))
+                continue
+
+            patch_version = last_patch_date_match.group(0).replace('-', '.')
+            if patch_version <= latest_image:
+                logging.debug('SKIP: Node {0} latest patch of {1} not newer that latest image version {2}'.format(vmss, patch_version, latest_image))
+                continue
+
+            ready_time = None
+            for condition in node.get('status', {}).get('conditions', []):
+                if condition.get('type', '') == 'Ready':
+                    if condition.get('status', '') == 'True':
+                        ready_time = int(time.mktime(time.strptime(condition['lastHeartbeatTime'], '%Y-%m-%dT%H:%M:%SZ')) - time.mktime(time.strptime(condition['lastTransitionTime'], '%Y-%m-%dT%H:%M:%SZ')))
+                    break
+            if not ready_time:
+                logging.debug('SKIP: Node {0} is not ready')
+                continue
+
+            if ready_time < sub_args.minimum_ready_time:
+                logging.debug('SKIP: Node {0} has been ready for only {1}s and the minimum is {2}s'.format(node_name, ready_time, sub_args.minimum_ready_time))
+                continue
+
+            potential_nodes.append({
+                'node': node_name,
+                'ready': ready_time
+            })
+
+        # Sort our list by ready time (earliest ready == longest running)
+        potential_nodes.sort(key=lambda data: data['ready'], reverse=True)
+
+        if len(potential_nodes) < sub_args.minimum_candidates:
+            logging.info('SKIP: VMSS {0}: Found {1} candidates - minimum candidates is {2}'.format(vmss, len(potential_nodes), sub_args.minimum_candidates))
+            continue
+
+        candidate_node = potential_nodes[0]['node']
+        logging.info('VMSS {0}: Picked candiate node {1} from {2} candidates'.format(vmss, candidate_node, len(potential_nodes)))
+        cmd = [
+                os.path.realpath(__file__),
+                '--log-level', sub_args.log_level,
+                'update',
+                '--resource-group', sub_args.resource_group,
+                '--new-updated-nodes', sub_args.new_updated_nodes,
+                '--max-history', sub_args.max_history,
+                '--grace-period', sub_args.grace_period,
+                '--target-node', candidate_node
+        ]
+
+        if sub_args.subscription:
+            cmd += ['--subscription', sub_args.subscription]
+
+        if sub_args.force:
+            cmd += ['--force']
+
+        # A bit of trickery - we launch a thread to run subprocess.call() such that
+        # it can run in the background while we move forward.  We do this such that
+        # if there are multiple pools, they can be processed in parallel
+        thread = threading.Thread(target=subprocess.call, args=([str(arg) for arg in cmd],))
+        thread.daemon = False
+        log_cmd(cmd)
+        thread.start()
+
+
 def in_cluster(sub_args, func):
-    '''
+    """
     Check for in-cluster behavior and do the that to set up some values in the
     arguments before calling the given func
     :param sub_args: The sub_args as given from the command line
     :param func: The function to complete the operation
-    '''
+    """
     if sub_args.in_cluster:
         with open('/etc/kubernetes/azure.json', 'r') as azure_json_file:
             data = json.load(azure_json_file)
@@ -944,6 +1100,17 @@ def in_cluster(sub_args, func):
     return func(sub_args)
 
 
+def VmssName(v):
+    """
+    VMSS Name validation type for argparser
+    :param v: The proposed vmss name
+    :return: The vmss name if it fits within naming constraints
+    """
+    if not is_vmss_name(v):
+        raise argparse.ArgumentTypeError("VMSS name must be something like:  eg k8s-pool-131414-vmss")
+    return v
+
+
 def NodeName(v):
     """
     VMSS Node Name validation type for argparser
@@ -953,6 +1120,7 @@ def NodeName(v):
     if not is_vmss_node(v):
         raise argparse.ArgumentTypeError("Node name must be a vmss node:  eg k8s-pool-131414-vmss0003ax")
     return v
+
 
 def NewUpdatedNodes(v):
     """
@@ -989,6 +1157,47 @@ def HistorySize(v):
     v = int(v)
     if v < 2:
         raise argparse.ArgumentTypeError("Value must not be at least 2")
+    return v
+
+
+def MinimumCandidates(v):
+    """
+    Ensure that minimum candidates is a number and is at least 1
+    :param v: The proposed minimum
+    :return: The minimum
+    """
+    v = int(v)
+    if v < 1:
+        raise argparse.ArgumentTypeError("Value must not be at least 1")
+    return v
+
+
+def MinimumReadyTime(v):
+    """
+    The minimum time for a node to be healthy.  This returns the number
+    in seconds (int) but supports modifiers such that you can do 5m for
+    5 minutes and 2h for 2 hours and 3d for 3 days.  (Or 12s for 12 seconds)
+    If no modifier, we assume seconds
+    :param v: The proposed minimum ready state
+    :return: The minimum ready time in seconds
+    """
+    factor = 1
+    if len(v) > 0:
+        if v[-1] == 's':
+            v = v[:-1]
+            factor = 1
+        elif v[-1] == 'm':
+            v = v[:-1]
+            factor = 60
+        elif v[-1] == 'h':
+            v = v[:-1]
+            factor = 60 * 60
+        elif v[-1] == 'd':
+            v = v[:-1]
+            factor = 60 * 60 * 24
+    v = int(v) * factor
+    if v < 0:
+        raise argparse.ArgumentTypeError("Value must not be non-negative")
     return v
 
 
@@ -1041,6 +1250,31 @@ def register_commands(subparser):
     parser.add_argument('--force', default=False, action='store_true',
                         help='Force using target node even if drain fails')
 
+    parser = add_command(subparser, "auto-update", func=vmss_prototype_auto_update,
+                         description='Automatically set up new/updated prototype if needed')
+    parser.add_argument('--running-on-node', default=None, type=str,
+                        help='The name of the node this is running on such that it can be skipped')
+    parser.add_argument('--target-vmss', action='append', nargs='+', type=VmssName,
+                        help='Target VMSS pools (all if not given)')
+    parser.add_argument('--pending-reboot-annotation', required=True, type=str,
+                        help='The name of the annotation that, if it exists, the node is pending reboot')
+    parser.add_argument('--last-patch-annotation', required=True, type=str,
+                        help='The name of the annotation that holds the timestamp at which the last patch was applied')
+    parser.add_argument('--node-skip-annotation', action='append', nargs='+', required=False, type=str,
+                        help='Optional annotations, that if it exists, will disqualify the node as a potential candidate')
+    parser.add_argument('--minimum-ready-time', default=60, type=MinimumReadyTime,
+                        help='Minimum time a node must in ready state before it is considered a candidate (default %(default)s)')
+    parser.add_argument('--minimum-candidates', default=1, type=MinimumCandidates,
+                        help='Minimum number of acceptable candidates (default: %(default)s)')
+    parser.add_argument('--new-updated-nodes', default=0, type=NewUpdatedNodes,
+                        help='Number of new nodes to add to the cluster after the VMSS has been updated from the prototype node (default: %(default)s)')
+    parser.add_argument('--max-history', default=3, type=HistorySize,
+                        help='Number of entries to keep in history - minimum is 2 - (default: %(default)s)')
+    parser.add_argument('--grace-period', type=int, default=300,
+                        help='Grace period in seconds for drain (default: %(default)s)')
+    parser.add_argument('--force', default=False, action='store_true',
+                        help='Force using target node even if drain fails')
+
 
 def set_better_help(sub_parser):
     """
@@ -1078,10 +1312,10 @@ def set_better_help(sub_parser):
 
 
 def main():
-    '''
+    """
     The main entry point that sets up the command line parser, parses the
     command line, and then runs what the command line produced.
-    '''
+    """
     # Quick logging of the raw command line to scm before anything can use it/fail
     # This includes the whole command line as at the point this starts (logging is not
     # available yet, so this goes to stderr)
