@@ -923,45 +923,45 @@ def vmss_prototype_auto_update(sub_args):
             # If not a node in target VMSS, continue...
             node_name = metadata.get('name', 'unknown')
             if vmss not in node_name:
-                logging.debug('IGNORE: Node {0} not part of vmss {1}'.format(node_name, vmss))
+                logging.debug('IGNORED: Node {0} not part of vmss {1}'.format(node_name, vmss))
                 continue
 
             if node_name == os.getenv('NODE_ID', None):
-                logging.debug('IGNORE: Node {0} is the same as the node we are running on'.format(node_name))
+                logging.debug('IGNORED: Node {0} is the same as the node we are running on'.format(node_name))
                 continue
 
             if node_name in node_ignore_names:
-                logging.debug('IGNORE: Node {0} is in the set of specific notes to ignore'.format(node_name))
+                logging.debug('IGNORED: Node {0} is in the set of specific notes to ignore'.format(node_name))
                 continue
 
             if node.get('spec', {}).get('unschedulable', False):
-                logging.debug('IGNORE: Node {0} as it is marked unschedulable'.format(node_name))
+                logging.debug('IGNORED: Node {0} as it is marked unschedulable'.format(node_name))
                 continue
 
             annotations = metadata.get('annotations', {})
 
             ignore = [annotation for annotation in node_ignore_annotations if annotation in annotations]
             if ignore:
-                logging.debug('IGNORE: Node {0} is annotated as needing to be ignored: {1}'.format(node_name, ignore))
+                logging.debug('IGNORED: Node {0} is annotated as needing to be ignored: {1}'.format(node_name, ignore))
                 continue
 
             if sub_args.pending_reboot_annotation in annotations:
-                logging.debug('IGNORE: Node {0} is annotated as pending reboot: {1}'.format(node_name, sub_args.pending_reboot_annotation))
+                logging.debug('IGNORED: Node {0} is annotated as pending reboot: {1}'.format(node_name, sub_args.pending_reboot_annotation))
                 continue
 
             last_patch = annotations.get(sub_args.last_patch_annotation, None)
             if not last_patch:
-                logging.debug('IGNORE: Node {0} does not have a last patch annotation: {1}'.format(node_name, sub_args.last_patch_annotation))
+                logging.debug('IGNORED: Node {0} does not have a last patch annotation: {1}'.format(node_name, sub_args.last_patch_annotation))
                 continue
 
             last_patch_date_match = re.search(r'\d\d\d\d-\d\d-\d\d', last_patch)
             if not last_patch_date_match:
-                logging.debug('IGNORE: Node {0} last patch annotation does not have a valid format: {1}={2}'.format(node_name, sub_args.last_patch_annotation, last_patch))
+                logging.debug('IGNORED: Node {0} last patch annotation does not have a valid format: {1}={2}'.format(node_name, sub_args.last_patch_annotation, last_patch))
                 continue
 
             patch_version = last_patch_date_match.group(0).replace('-', '.')
             if patch_version <= latest_image:
-                logging.debug('IGNORE: Node {0} latest patch of {1} not newer that latest image version {2}'.format(node_name, patch_version, latest_image))
+                logging.debug('IGNORED: Node {0} latest patch of {1} not newer that latest image version {2}'.format(node_name, patch_version, latest_image))
                 continue
 
             ready_time = None
@@ -971,11 +971,11 @@ def vmss_prototype_auto_update(sub_args):
                         ready_time = int(time.mktime(time.strptime(condition['lastHeartbeatTime'], '%Y-%m-%dT%H:%M:%SZ')) - time.mktime(time.strptime(condition['lastTransitionTime'], '%Y-%m-%dT%H:%M:%SZ')))
                     break
             if not ready_time:
-                logging.debug('IGNORE: Node {0} is not ready')
+                logging.debug('IGNORED: Node {0} is not ready')
                 continue
 
             if ready_time < sub_args.minimum_ready_time:
-                logging.debug('IGNORE: Node {0} has been ready for only {1}s and the minimum is {2}s'.format(node_name, ready_time, sub_args.minimum_ready_time))
+                logging.debug('IGNORED: Node {0} has been ready for only {1}s and the minimum is {2}s'.format(node_name, ready_time, sub_args.minimum_ready_time))
                 continue
 
             potential_nodes.append({
@@ -987,7 +987,7 @@ def vmss_prototype_auto_update(sub_args):
         potential_nodes.sort(key=lambda data: data['ready'], reverse=True)
 
         if len(potential_nodes) < sub_args.minimum_candidates:
-            logging.info('IGNORE: VMSS {0}: Found {1} candidates - minimum candidates is {2}'.format(vmss, len(potential_nodes), sub_args.minimum_candidates))
+            logging.info('IGNORED: VMSS {0}: Found {1} candidates - minimum candidates is {2}'.format(vmss, len(potential_nodes), sub_args.minimum_candidates))
             continue
 
         candidate_node = potential_nodes[0]['node']
