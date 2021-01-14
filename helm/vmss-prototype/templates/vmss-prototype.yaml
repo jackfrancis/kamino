@@ -71,6 +71,28 @@ spec:
             - {{ required "missing required kamino.drain.gracePeriod" .Values.kamino.drain.gracePeriod | quote }}
             - --max-history
             - {{ required "missing required kamino.imageHistory" .Values.kamino.imageHistory | quote }}
+            {{- else if hasKey .Values.kamino "targetVMSS" }}
+            - --log-prefix
+            - auto-update
+            - auto-update
+            - --new-updated-nodes
+            - {{ .Values.kamino.newUpdatedNodes | quote }}
+            - --grace-period
+            - {{ required "missing required kamino.drain.gracePeriod" .Values.kamino.drain.gracePeriod | quote }}
+            - --max-history
+            - {{ required "missing required kamino.imageHistory" .Values.kamino.imageHistory | quote }}
+            {{- if not (eq .Values.kamino.targetVMSS "ALL") }}
+            - --target-vmss
+            - {{ .Values.kamino.targetVMSS | quote }}
+            {{- end }}
+            - --last-patch-annotation
+            - {{ required "missing requires kamino.auto.lastPatchAnnotation" .Values.kamino.auto.lastPatchAnnotation | quote }}
+            - --pending-reboot-annotation
+            - {{ required "missing requires kamino.auto.pendingRebootAnnotation" .Values.kamino.auto.pendingRebootAnnotation | quote }}
+            - --minimum-ready-time
+            - {{ .Values.kamino.auto.minimumReadyTime | quote }}
+            - --minimum-candidates
+            - {{ .Values.kamino.auto.minimumCandidates | quote }}
             {{- else }}
             # Just a status run
             - status
