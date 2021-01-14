@@ -995,6 +995,7 @@ def vmss_prototype_auto_update(sub_args):
         cmd = [
                 os.path.realpath(__file__),
                 '--log-level', sub_args.log_level,
+                '--log-prefix', vmss,
                 'update',
                 '--resource-group', sub_args.resource_group,
                 '--new-updated-nodes', sub_args.new_updated_nodes,
@@ -1148,6 +1149,20 @@ def NodeName(v):
     """
     if not is_vmss_node(v):
         raise argparse.ArgumentTypeError("Node name must be a vmss node:  eg k8s-pool-131414-vmss0003ax")
+    return v
+
+
+def LogPrefix(v):
+    """
+    Log prefix validation - prefix must not have spaces or ":"
+    :param v: The proposed prefix
+    :return: The prefix if it fits within naming constraints
+    """
+    v = str(v)
+    if ':' in v:
+        raise argparse.ArgumentTypeError("Log prefix must not have a ':' in it")
+    if ' ' in v:
+        raise argparse.ArgumentTypeError("Log prefix must not have a space in it")
     return v
 
 
@@ -1373,6 +1388,8 @@ def main():
                         default='INFO',
                         help="Set the logging level (default: %(default)s)")
 
+    parser.add_argument('--log-prefix', default=None, type=LogPrefix)
+
     parser.add_argument('--log-timestamps', default=False, action='store_true',
                         help='Include timestamps in the logging output')
 
@@ -1392,9 +1409,22 @@ def main():
     # Parse the arguments
     cmd_line_args = parser.parse_args()
 
-    # Set our logging level and output format (with timestamps or simple)
-    logging.basicConfig(level=cmd_line_args.log_level,
-                        format='%(asctime)s\t%(levelname)s: %(message)s' if cmd_line_args.log_timestamps else '%(levelname)s: %(message)s')
+    # Build our log format
+    log_format = ''
+
+    # If we have command line option to turn on timestamps, they are first
+    if cmd_line_args.log_timestamps:
+        log_format += '%(asctime)s\t'
+
+    # If we have a log prefix, add that
+    if cmd_line_args.log_prefix:
+        log_format += '{0}\t'.format(cmd_line_args.log_prefix)
+
+    # Our normal format:  the log level and then the message
+    log_format += '%(levelname)s: %(message)s'
+
+    # Set our logging level and output format
+    logging.basicConfig(level=cmd_line_args.log_level, format=log_format)
 
     # and call the appropriate function
     cmd_line_args.func(cmd_line_args)
