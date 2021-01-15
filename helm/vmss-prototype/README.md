@@ -157,7 +157,7 @@ Kamino can follow some rules for automatic node selection.  These are the parame
   - This is another way to validate the new nodes before committing to using them.  In large clusters, one may wish to see some number of patched and updated nodes successfully running before accpeting that one of the updated nodes is a potential candidate to be the prototype.
 
 - `kamino.auto.dryRun` (optional - defaults to false)
-  - If set to true, the auto-update process will only show what choices it made but not actually executed the update process.
+  - If set to true, the auto-update process will only show what choices it made but not actually execute the update process.
 
 ### Manual node selection
 
