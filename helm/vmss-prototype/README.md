@@ -78,8 +78,51 @@ The `vmss-prototype` operation carries out a procedural set of steps, each of wh
 
 That's how it works! Hopefully all that level of detail helps to solidify the value of having regularly, freshly configured nodes across your node pool. Once again:
 
-1. Pick your best node running in a pool.
+1. Pick your best node running in a pool.  (See next section for automation of that step)
 2. Make all new nodes like it.
+
+## How does vmss-prototype auto-update work?
+
+The auto-update process is a way to automatically determine if an update to the prototype image is needed and what node should be used (and can be used) as the source for the new image.
+
+This process is designed to be able to be automatically run via something like kubernetes cronjob, where most of the time it does nothing as nothing is needed or nothing can be done (not valid candidate nodes for new images).
+
+This also depends on some tool to provide information about the nodes in the form of annotations such that we can tell which nodes are potential candidates due to new OS patches having been installed and that they are not pending a reboot/restart.
+
+These two annotations are defined as the `last-patch` annotation and the `pending-reboot` annotation.  The `vmss-prototype` system can be told what these annotations are such that we can integrate with different node reboot systems.  There is a [proposed change](https://github.com/weaveworks/kured/pull/296) for [kured](https://github.com/weaveworks/kured) that will provide this functionality.
+
+The `last-patch` annotation has, as its value, an [RFC 3339](https://www.ietf.org/rfc/rfc3339.txt) timestamp string in it that indicates when the last OS patch was applied.
+
+The process goes as follows for each VMSS in the cluster or the VMSS specified as the target VMSS:
+
+1. Get the current version of the prototype image for the VMSS in question.  There may be none (thus version 0) or some existing version that is encoded as a `yyyy.mm.dd` version identifier for the Azure Shared Image Gallery
+2. Get information about all the nodes in the cluster, including status, annotations, etc.
+3. For each node complete the following checks.  If any check fails, that node is ignored as a potential candidate.  I
+    1. is the node part of the target VMSS?  (Ignored if not)
+    2. is the node running the auto-update process?  (Ignored if it is)
+    3. does the node match one of the (optional) list of node names to be ignored?  (Ignored if it is)
+    4. is the node "unschedulable"?  (Ignored if it is)
+    5. does the node have any of the (optional) ignore node annotations?  (Ignored if it does)
+    6. does the node have the `pending-reboot` annotation?  (Ignored if it does)
+    7. does the node have the `last-patch` annotation?  (Ignored if it does not)
+    8. is the value of the `last-patch` annotation valid?  (Ignored if it is not)
+    9. is the `last-patch` annotation a newer date (aka version) compared to the current image version?  (Ignored if it is not)
+    10. is the node in 'Ready' state?  (Ignored if it is not)
+    11. has the node been continuously in 'Ready' state for at least (configurable) 1 hour?  (Ignored if it has not)
+    12. Add nodes that pass the above checks to the list of candidates.
+4. If there are not enough candidates, we have nothing to do for this VMSS.  The default is that 1 candidate would be sufficient.
+5. From the list of candidates, pick the one that has shown the longest stability of execution.  (We picked some minimum stable time earlier)
+6. Using that candidate, start the update process [described above](#how-does-vmss-prototype-actually-work).
+7. Repeat from #1 above for the next VMSS pool
+8. Wait for all the triggered update processes to complete.
+9. Report the now current status of the prototype images.
+
+The magic here is the `last-patch` annotation that tools that are responsible for patching OS nodes would set automatically.  With such as setup, one can just have the auto-update process run as a cronjob and automatically pick notice and build/deploy new prototype images for the VMSS.
+
+Note that we directly run the "manual" update process as part of the automatic process.  Thus, a manual update produces exactly the same results as an automatic update would.
+
+_Future feature - a way to force a new image if there has not been a new OS patch.  We have such a system in the platform where this has been brought from but that has some dependencies on additional health and age monitoring that is not available generically._
+
 
 ## A final note on VMSS instance rolling upgrades
 
