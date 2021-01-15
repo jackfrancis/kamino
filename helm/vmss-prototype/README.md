@@ -2,24 +2,15 @@
 
 `vmss-prototype` takes a snapshot of the OS image from one instance in your VMSS node pool, and then updates the VMSS model definition so that future instances (nodes) use that image snapshot.
 
-This simple concept can dramatically improve node scaling response time and reliability:
+This simple concept can dramatically improve node scaling response time, security, and reliability:
 
 1. Pick your best node running in a pool.
 2. Make all new nodes like it.
 
-## Example
+## Examples
 
-Below is the canonical way to run vmss-prototype on your cluster using our published Helm Chart:
-
-```bash
-$ helm install --repo https://jackfrancis.github.io/kamino/ \
-  update-vmss-model-image-from-instance-0 \
-  vmss-prototype --namespace default \
-  --set kamino.scheduleOnControlPlane=true \
-  --set kamino.targetNode=k8s-pool1-12345678-vmss000000
-```
-
-A complete walkthrough of using `vmss-prototype` on a cluster is [here](walkthrough.md).
+1. A [low level walkthrough of this being done manually](manual-update.md).
+2. A [higher level walkthrough of this being done automatically](auto-update.md)
 
 ## Cluster Configuration Requirements before using
 
@@ -32,7 +23,7 @@ A complete walkthrough of using `vmss-prototype` on a cluster is [here](walkthro
 - It expects that the set of systemd service definitions (kublet, containerd|docker, etc) to be implemented generically with respect to the underlying hostname. In other words, it expects that there are no static references to a very particular hostname string, but instead all local references will derive from a runtime reference equivalent to `$(hostname)`.
 - It expects the Kubernetes application layer (i.e., kubelet) to defer to the network stack for IP address information — i.e., it expects no static IP configuration to be present.
 - It expects the Azure VMSS definition to have a "DHCP-like" network configuration for instances as they are created; again, no static IP address configurations.
-- It expects that when a new VM built with this image snapshot will be pre-configured to run the necessary Kubernetes node runtime (kublet) automatically, and join the cluster without any additional bootstrap scripts. This requirement is owing to the fact that cloud-init and any CustomScriptExtensions attached to the VMSS model definition are removed during the `vmss-prototype` process. These are removed by design, to optimize the node join process by removing unnecessary (all Kubernetes runtime configuration has already been applied) boot cycle friction.
+- It expects that when a new VM built with this image snapshot will be able to boot and run the necessary Kubernetes node runtime (kublet) automatically, and join the cluster without any additional bootstrap scripts.  This requirement is easily achieved by the fact that the VM wishes to be able to be rebooted/restarted and return to functioning in the cluster.  We depend on this such that cloud-init and any CustomScriptExtensions attached to the VMSS model definition can be elided (removed) during the `vmss-prototype` process. These are removed by design, to optimize the node join process by removing unnecessary (all Kubernetes runtime configuration has already been applied) boot cycle friction and failure points.
 
 The above details reflect operational configurations produced by a Kubernetes + Azure cluster created with the [AKS Engine](https://github.com/Azure/aks-engine) tool. As of this writing, AKS Engine-created clusters are the only validated, known-working Azure Kubernetes cluster "flavor"; strictly speaking, so long as the above set of cluster configuration requirements are met, any Kubernetes cluster's VMSS nodes running on Azure may take advantage of `vmss-prototype`.
 
@@ -69,7 +60,7 @@ The `vmss-prototype` operation carries out a procedural set of steps, each of wh
 2. Validate (1) that the targetNode exists in the cluster, (2) is a VMSS instance, and (3) is in a Ready state.
 3. Create a named _Shared Image Gallery_ (SIG) resource in the cluster, if it doesn't already exist. The name of this SIG will be `"SIG_<resource_group>"`, where `<resource_group>` is the name of the resource group that your cluster resources (in particular your VMSS) are installed into. Because the resource group your cluster VMSS is running in does not change, this suffix can be considered a static constant: this SIG will always exist under that name so long as `vmss-prototype` is being used. It's also easy to create idempotently: if it's already there, we just use it; if it isn't, we know this is the first time that `vmss-prototype` has been run in this cluster.
 4. Create a named SIG _Image Definition_ within the named SIG created by the above step, if it doesn't already exist. An Image Definition is essentially a named bucket that will contain a bunch of "versioned" images. The name of this SIG Image Definition will be `kamino-<nodepool_name>-vmss-prototype`, where `<nodepool_name>` is the name of the VMSS node pool in your cluster. Similar to how we idempotently create the SIG itself, this Image Definition can be statically, uniquely identified so long as the node pool exists in your cluster.
-5. Verify that we have not yet created an Image Definition _version_ (in other words, an actual image) for this VMSS node pool in the last 24 hours. The Image Definition versions are named by date using a format `YYYY.MM.DD`, which means **you can only create one image per day, per VMSS node pool**.
+5. Verify that we have not yet created an Image Definition _version_ (in other words, an actual image) for this VMSS node pool in the last 24 hours. The Image Definition versions are named by date using a format `YYYY.MM.DD`, which means **you can only create one new image per day, per VMSS node pool**.
 6. Similarly verify that we have not yet created an OS snapshot from the target VMSS instance in the last 24 hours. If we _do have an image with the current day's version_, then we don't fail the operation, but instead assume that we are in a retry context, and skip to step 14 below to build the SIG Image Definition version from the snapshot with today's date. If there is not an image with today's timestamp then we go to the next step:
 7. Add a node annotation of `"cluster-autoscaler.kubernetes.io/scale-down-disabled=true"` to the target node, so that if cluster-autoscaler is running in our cluster we prevent it from _deleting that node_ (that's what happens when you scale down), and thus deleting the VMSS instance, while we are taking an OS image snapshot of the instance.
 8. Cordon + drain the target node in preparation for taking it offline. If the cordon + drain fails, we will fail the operation _unless we pass in the `--force` option to the `vmss-prototype` tool (see the Helm Chart usage of `kamino.drain.force` below)_.
@@ -79,7 +70,7 @@ The `vmss-prototype` operation carries out a procedural set of steps, each of wh
 12. Uncordon the node to allow Kubernetes to schedule workloads onto it.
 13. Remove the `cluster-autoscaler.kubernetes.io/scale-down-disabled` cluster-autoscaler node annotation as we no longer care if this node is chosen for removal by cluster-autoscaler.
 14. Build a new SIG Image Definition _version_ (i.e., the actual image we're going to update the VMSS to use) from the recently captured snapshot image. This takes a long time! In our tests we see a 30 GB image (the OS disk size default for many Linux distros) take between 30 minutes and 2 _hours_ to be rendered as a SIG Image Definition version!
-15. After the new SIG Image Definition version has been created, we delete the snapshot image as it will no longer be needed for use.
+15. After the new SIG Image Definition version has been created, we delete the snapshot image as it will no longer be needed.
 16. We now prune older SIG Image Definition versions (configurable, see the usage of `kamino.imageHistory` in the official Helm Chart docs below).
 17. Update the target instance's VMSS model so that its OS image refers to the newly created SIG Image Definition version. This means that the very next instance built with this VMSS will derive from the newly created image. *This update operation does not affect existing instances: The `vmss-prototype` tool does not instruct the VMSS API to perform a "rolling upgrade" to ensure that all instances are running this new OS image! Similarly, `vmss-prototype` **will not** perform a "rolling upgrade" across the other, existing VMSS instances, nor will it create new, replacement instances, and delete old instances!*
 18. Update the target instance's cloud-init configuration so that it no longer includes "one-time bootstrap" configuration. Because this instance was _already_ bootstrapped when the cluster was created, we don't need to perform those various prerequisite file system operations: by updating the VMSS's OS image reference to a "post-bootstrapped" image, `vmss-prototype` has made it unnecessary for new instances to perform this cloud-init bootstrap overhead: our new nodes will come online more quickly!
@@ -100,11 +91,9 @@ It's also worth emphasizing that the problem domain addressed by `vmss-prototype
 
 `vmss-prototype` is packaged for use as a Helm Chart, hosted at the `https://jackfrancis.github.io/kamino/` Helm Repository.
 
-The following Helm Chart values are exposed to configure a `vmss-prototype` release:
+The following Helm Chart values are exposed to configure a `vmss-prototype` release.  See [the values.yaml file](values.yaml) for details and defaults.
 
-- `kamino.targetNode` (required to actually create a new prototype updated the VMSS model)
-  - e.g., `--set kamino.targetNode=k8s-pool1-12345678-vmss000000`
-  - This is the node to derive a "prototype" from. Must exist in your cluster, be in a Ready state, and be backed by a VMSS-created instance. The VMSS (scale set) that this node instance is a part of will be updated as part of the `vmss-prototpe` operation. We recommend you choose a node that has been validated against your operational criteria (e.g., running the latest OS patches and/or security hotfixes). We also recommend that you choose a node that is performing an operational role suitable for being taken temporarily out of service, as the `vmss-prototype` operation will include a cordon + drain against this node in order to shut down the VMSS instance and take a snapshot of the OS disk. If you omit this option, then `vmss-prototype` will not create a new prototype, but will instead report back the status of existing VMSS prototypes built from this tool by looking at all VMSS in the resource group.
+### Common values
 
 - `kamino.scheduleOnControlPlane` (default value is `false`)
   - e.g., `--set kamino.scheduleOnControlPlane=true`
@@ -126,8 +115,58 @@ The following Helm Chart values are exposed to configure a `vmss-prototype` rele
   - e.g., `--set kamino.drain.force=true`
   - Override the default if you wish to force a drain even if the grace period has expired, or if there are non-replicated pods (e.g., not part of a ReplicationController, ReplicaSet [i.e., Deployment], DaemonSet, StatefulSet or Job). This is directly equivalent to the `--force` flag of the `kubectl drain` CLI operation
 
-More documentation on node drain can be found [here in the `kubectl` documentation](https://kubernetes.io/docs/reference/generated/kubectl/kubectl-commands#drain).
+  More documentation on node drain can be found [here in the `kubectl` documentation](https://kubernetes.io/docs/reference/generated/kubectl/kubectl-commands#drain).
+
 
 - `kamino.logLevel` (default value is `INFO`, options are `DEBUG`, `INFO`, `WARNING`, `ERROR`, and `CRITICAL`)
-  - e.g., `--set kamino.logLevel=VERBOSE`
+  - e.g., `--set kamino.logLevel=DEBUG`
   - Override the default if you wish to see more or less log output in the `vmss-prototype` pod.
+
+### Automatic node selection
+
+Kamino can follow some rules for automatic node selection.  These are the parameters for the helm chart (in addition to the above) to enable this.
+
+- `kamino.targetVMSS` (required to run in automatic mode)
+  - A value of `ALL` will automatically scan for all VMSS pools
+    - e.g., `--set kamino.targetVMSS=ALL`
+  - A value of the VMSS name.  This is the name of the VMSS without the node-specific identifier appended.  For example, `k8s-pool1-12345678-vmss` would be the VMSS that contains nodes such as `k8s-pool1-12345678-vmss000000`
+    - e.g., `--set kamino.targetVMSS=k8s-pool1-12345678-vmss`
+
+- `kamino.auto.lastPatchAnnotation` (required)
+  - This defines the name of the annotation on the nodes that holds an RFC3339 timestamp of when it last applied an OS patch.  If this annotation is missing, it is assumed the node has not applied an OS patch yet.
+    - e.g., `--set kamino.auto.lastPatchAnnotation=LatestOSPatch`
+
+- `kamino.auto.pendingRebootAnnotation` (required ??)
+  - This annotation on a node that indicates that the node is in need of reboot for some reason (pending OS patch or other servicing).  Nodes with this annotation are not considered as a viable candidate for making an image.
+    - e.g., `--set kamino.auto.pendingRebootAnnotation=RebootPending`
+  - Note that setting this to some annotation that never exists causes the system to not filter out any nodes due to this constraint.
+
+- `kamino.auto.minimumReadyTime` (default 1h)
+  - This is the minimum time a node must have been in constant "ready" state for it to be considered a potential candidate as the prototype.
+  - Values are logically in seconds unless a modifier is used.  For example:
+    - `--set kamino.auto.minimumReadyTime=3` --> 3 seconds
+    - `--set kamino.auto.minimumReadyTime=3s` --> 3 seconds
+    - `--set kamino.auto.minimumReadyTime=3m` --> 3 minutes
+    - `--set kamino.auto.minimumReadyTime=3h` --> 3 hours
+    - `--set kamino.auto.minimumReadyTime=3d` --> 3 days
+  - It is recommended to not have this value too low as this determines how long a node must have been operating before we consider it healthy enough to build future nodes from it.
+
+- `kamino.auto.minimumCandidates` (default 1)
+  - This is the minimum number of valid candidates before one is selected.  Must be at least 1 (since you can't selected from a candidate pool of size 0)
+    - e.g., `--set kamino.auto.minimumCandidates=5`
+  - This is another way to validate the new nodes before committing to using them.  In large clusters, one may wish to see some number of patched and updated nodes successfully running before accpeting that one of the updated nodes is a potential candidate to be the prototype.
+
+- `kamino.auto.dryRun` (optional - defaults to false)
+  - If set to true, the auto-update process will only show what choices it made but not actually execute the update process.
+
+### Manual node selection
+
+When running lower level, you can manually select the node that will be used as the prototype.  Internally, this is what the automatic node selection runs after selecting the node.
+
+- `kamino.targetNode` (required to run in manual mode)
+  - e.g., `--set kamino.targetNode=k8s-pool1-12345678-vmss000000`
+  - This is the node to derive a "prototype" from. Must exist in your cluster, be in a Ready state, and be backed by a VMSS-created instance. The VMSS (scale set) that this node instance is a part of will be updated as part of the `vmss-prototpe` operation. We recommend you choose a node that has been validated against your operational criteria (e.g., running the latest OS patches and/or security hotfixes). We also recommend that you choose a node that is performing an operational role suitable for being taken temporarily out of service, as the `vmss-prototype` operation will include a cordon + drain against this node in order to shut down the VMSS instance and take a snapshot of the OS disk. If you omit this option, then `vmss-prototype` will not create a new prototype, but will instead report back the status of existing VMSS prototypes built from this tool by looking at all VMSS in the resource group.
+
+### Status operation
+
+If not given a manual node selection or an automatic node selection operation, the chart defaults to just collecting the status of the `vmss-prototype` images and VMSS pools in the cluster and renders that into the logs.

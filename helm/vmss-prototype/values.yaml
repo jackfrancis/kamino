@@ -8,11 +8,10 @@ kamino:
     # TODO:  Point these to our public container registry once we have it setup
     imageRegistry: ghcr.io
     imageRepository: jackfrancis/kamino/vmss-prototype
-    imageTag: latest
-    # Pulling by has is stronger assurance that things are not changed
-    #imageHash: "xxx"
-    # Since we don't define a hash here, set this to false
-    pullByHash: false
+    imageTag: v0.0.3
+    # Pulling by hash has stronger assurance that the container is unchanged
+    imageHash: "a421ff768a798d581178626386c67117af2e2262dde334cef15d8f92df1a178f"
+    pullByHash: true
 
     # include the name of the image pull secret in your cluster if you
     # need one.  (Note that they are local to the namespace you deploy in)
@@ -33,6 +32,36 @@ kamino:
     # is not respected by the workloads in the cluster.
     force: false
 
+  auto:
+    # This is the minimum amount of time a node needs to be ready before it
+    # is considered "good"
+    # Number of seconds or with single character suffix for seconds, minutes,
+    # hours, or days
+    #  3s == 3 seconds
+    #  3m == 3 minutes
+    #  3h == 3 hours
+    #  3d == 3 days
+    # We pick a default of 1h (1 hour)
+    minimumReadyTime: 1h
+
+    # The minimum number of valide candidates before we consider that we
+    # have enough signal to pick one of them.  The default is 1 as you must
+    # have 1 candidate but large critical clusters you may wish to wait
+    # until you have a number of nodes that have taken the updates and are
+    # in ready state before you commit to picking one of them as a good
+    # candidate.
+    minimumCandidates: 1
+
+    # The annotation on a node that holds the last time a patch was
+    # "applied"
+    #lastPatchAnnotation: weave.works/kured-most-recent-reboot-needed
+
+    # If this annotation exists, we do not want the node as it is
+    # pending a servicing reboot.  We don't want pending reboot nodes
+    #pendingRebootAnnotation: weave.works/kured-reboot-in-progress
+
+    dryRun: false
+
   # This is the log-level for the process via python logging.
   # Each level includes all below it, so DEBUG includes INFO, WARNING, etc...
   # Best keep this at INFO
@@ -44,12 +73,18 @@ kamino:
   # CRITICAL - Show only complete critical faults
   logLevel: INFO
 
-  # The cluster name and the target node are not things we can know
+  # The the target node are not things we can know
   # automatically
   #targetNode: k8s-agentpool1-12345678-vmss0001ct
 
+  # The target VMSS to use, or "ALL" for automatically doing all of them
+  # Only useful if you don't have a targetNode
+  #targetVMSS: k8s-agentpool1-12345678-vmss
+  #targetVMSS: ALL
+
   # Set newUpdatedNodes to a higher value to immediately add more nodes built from the prototype after VMSS update is complete
   newUpdatedNodes: 0
+
   # Require scheduling the pod onto a control plane VM using the AKS Engine control plane VM identifier
   # Default to false, which allows scheduling on any node other than the targetNode
   scheduleOnControlPlane: false
