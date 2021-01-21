@@ -736,20 +736,6 @@ def vmss_prototype_update(sub_args):
                     '--no-wait'
                     ], retries=3, check=False, retry_func=not_found_no_retry)
 
-            finally:
-                # Let it be a productive member of the cluster again
-                # We ignore errors here since the VM may no longer exist
-                # We best-effort uncordon it.
-                run(['kubectl', 'uncordon',
-                     target_node
-                     ], retries=3, check=False, retry_func=not_found_no_retry)
-
-                # Allow the cluster from scaling away the node...
-                run(['kubectl', 'annotate', 'node',
-                     target_node,
-                     'cluster-autoscaler.kubernetes.io/scale-down-disabled-'
-                     ], retries=3, check=False, retry_func=not_found_no_retry)
-
         # Build the image version from the snapshow we have
         output = vmss_build_sig_image(subscription, resource_group, sig_name, image_definition, version, snapshot)
         image_version = json.loads(output)
