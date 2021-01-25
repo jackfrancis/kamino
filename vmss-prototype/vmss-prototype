@@ -730,13 +730,14 @@ def vmss_prototype_update(sub_args):
 
                 # Delete the instance to prevent idns side-effects from future VMs coming online based on its prototype
                 # See https://github.com/jackfrancis/kamino/issues/26
-                run(az(['vmss', 'delete-instances'], subscription) + [
+                ret = run(az(['vmss', 'delete-instances'], subscription) + [
                     '--resource-group', resource_group,
                     '--name', vmss,
                     '--instance-ids', instance_id,
                     '--no-wait'
                     ], retries=3, check=False, retry_func=not_found_no_retry)
-                nodeDeleted = True
+                if ret == 0:
+                    nodeDeleted = True
 
             finally:
                 if not nodeDeleted:
