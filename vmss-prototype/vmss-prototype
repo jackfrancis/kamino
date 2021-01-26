@@ -911,6 +911,13 @@ def get_candidate_nodes(vmss, nodes, node_ignore_names, node_ignore_annotations,
             logging.debug('IGNORED: Node {0} as it is marked unschedulable'.format(node_name))
             continue
 
+        # Filtering out masters normally is not needed unless they are, for
+        # some reason, within a VMSS.  We still don't want to make fresh images
+        # here as masters are a bit special.
+        if metadata.get('labels', {}).get('kubernetes.io/role', '') == 'master':
+            logging.debug('IGNORED: Node {0} is a control plane node'.format(node_name))
+            continue
+
         annotations = metadata.get('annotations', {})
 
         ignore = [annotation for annotation in node_ignore_annotations if annotation in annotations]
