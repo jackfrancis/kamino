@@ -511,6 +511,15 @@ def vmss_build_sig_image(subscription, resource_group, sig_name, image_definitio
     return output
 
 
+def mktime_from_kubernetes(kube_time_string):
+    """
+    Convert a kubernetes RFC time string into python time value
+    :param kube_time_string:  The time string from a kubernetes element
+    :return:  A Python time value (floating point value)
+    """
+    return time.mktime(time.strptime(kube_time_string, '%Y-%m-%dT%H:%M:%SZ'))
+
+
 def format_into_version(date_time):
     """
     Convert a datetime into a version string
@@ -949,7 +958,7 @@ def get_candidate_nodes(vmss, nodes, node_ignore_names, node_ignore_annotations,
         for condition in node.get('status', {}).get('conditions', []):
             if condition.get('type', '') == 'Ready':
                 if condition.get('status', '') == 'True':
-                    ready_time = int(time.mktime(time.strptime(condition['lastHeartbeatTime'], '%Y-%m-%dT%H:%M:%SZ')) - time.mktime(time.strptime(condition['lastTransitionTime'], '%Y-%m-%dT%H:%M:%SZ')))
+                    ready_time = int(mktime_from_kubernetes(condition['lastHeartbeatTime']) - mktime_from_kubernetes(condition['lastTransitionTime']))
                 break
         if not ready_time:
             logging.debug('IGNORED: Node {0} is not ready')
