@@ -7,7 +7,6 @@ on:
         required: true
 jobs:
   image:
-    environment: kamino-ci
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
