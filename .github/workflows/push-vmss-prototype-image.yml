@@ -50,6 +50,9 @@ jobs:
           repository: Azure/aks-engine
           path: aks-engine
           ref: master # TODO change to a strongly-versioned ref once the kamino E2E integrations are in a released version
+      - name: build aks-engine binary
+        run: make build-binary
+        working-directory: aks-engine
       - name: run aks-engine E2E
         env:
           ORCHESTRATOR_RELEASE: "1.19"
@@ -65,6 +68,5 @@ jobs:
           GINKGO_FOCUS: "should be able to install vmss node prototype"
           RUN_VMSS_NODE_PROTOTYPE: true
           KAMINO_VMSS_PROTOTYPE_IMAGE_TAG: ${{ env.RELEASE_VERSION }}
-        run: |
-          make test-kubernetes
+        run: make test-kubernetes
         working-directory: aks-engine
