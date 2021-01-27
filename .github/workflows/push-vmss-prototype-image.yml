@@ -7,9 +7,13 @@ on:
         required: true
 jobs:
   image:
+    environment: kamino-ci
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
+      - uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
       - name: set env
         run: echo "RELEASE_VERSION=${{github.event.inputs.image_tag}}-canary" >> $GITHUB_ENV
         if: ${{github.event.inputs.image_tag != ''}}
@@ -28,3 +32,41 @@ jobs:
           file: vmss-prototype/Dockerfile
           tags: |
             ghcr.io/jackfrancis/kamino/vmss-prototype:${{ env.RELEASE_VERSION }}
+      - name: install go
+        uses: actions/setup-go@v2
+        with:
+          go-version: '^1.15'
+      - name: install ginkgo
+        run: go get -u github.com/onsi/ginkgo/ginkgo
+      - name: install helm
+        run: |
+          curl https://baltocdn.com/helm/signing.asc | sudo apt-key add -
+          sudo apt-get install apt-transport-https --yes
+          echo "deb https://baltocdn.com/helm/stable/debian/ all main" | sudo tee /etc/apt/sources.list.d/helm-stable-debian.list
+          sudo apt-get update
+          sudo apt-get install helm
+      - name: checkout aks-engine
+        uses: actions/checkout@v2
+        with:
+          repository: Azure/aks-engine
+          path: aks-engine
+          ref: master # TODO change to a strongly-versioned ref once the kamino E2E integrations are in a released version
+      - name: run aks-engine E2E
+        env:
+          ORCHESTRATOR_RELEASE: "1.19"
+          CLUSTER_DEFINITION: "examples/kubernetes.json"
+          SUBSCRIPTION_ID: ${{ secrets.TEST_AZURE_SUB_ID }}
+          CLIENT_ID: ${{ secrets.TEST_AZURE_SP_ID }}
+          CLIENT_SECRET: ${{ secrets.TEST_AZURE_SP_PW }}
+          CLIENT_OBJECTID: ${{ secrets.TEST_AZURE_SP_OID }}
+          LOCATION: "westus2"
+          TENANT_ID: ${{ secrets.TEST_AZURE_TENANT_ID }}
+          SKIP_LOGS_COLLECTION: true
+          CLEANUP_ON_EXIT: false
+          CLEANUP_IF_FAIL: false
+          GINKGO_FOCUS: "should be able to install vmss node prototype"
+          RUN_VMSS_NODE_PROTOTYPE: true
+          KAMINO_VMSS_PROTOTYPE_IMAGE_TAG: ${{ env.RELEASE_VERSION }}
+        run: |
+          make test-kubernetes
+        working-directory: aks-engine
