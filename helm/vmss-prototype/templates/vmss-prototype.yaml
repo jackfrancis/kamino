@@ -93,6 +93,11 @@ spec:
             - {{ .Values.kamino.auto.minimumReadyTime | quote }}
             - --minimum-candidates
             - {{ .Values.kamino.auto.minimumCandidates | quote }}
+            - --maximum-image-age
+            - {{ .Values.kamino.auto.maximumImageAge | quote }}
+            {{- if .Values.kamino.auto.dryRun }}
+            - --dry-run
+            {{- end }}
             {{- else }}
             # Just a status run
             - status
