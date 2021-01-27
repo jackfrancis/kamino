@@ -703,7 +703,7 @@ def vmss_prototype_update(sub_args):
 
                 if rc != 0:
                     if not sub_args.force:
-                        fatal_error('Could not drain node {0}', target_node)
+                        fatal_error('Could not drain node {0}'.format(target_node))
 
                     # Move any none-daemonset (or node) pods off of this node that have not
                     # drained (they should have drained already but just in case)
