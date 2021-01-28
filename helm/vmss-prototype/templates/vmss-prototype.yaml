@@ -1,8 +1,8 @@
 {{- if hasKey .Values "kamino" -}}
 {{- $jobName := printf "%s-%s" .Values.kamino.name "status" -}}
-{{- if hasKey .Values.kamino "targetNode" -}}
+    {{- if hasKey .Values.kamino "targetNode" -}}
 {{- $jobName = printf "%s-%s" .Values.kamino.name (substr 0 (int (sub (len .Values.kamino.targetNode) 6)) .Values.kamino.targetNode) -}}
-{{- end -}}
+    {{- end -}}
 
 apiVersion: batch/v1
 kind: Job
@@ -81,10 +81,10 @@ spec:
             - {{ required "missing required kamino.drain.gracePeriod" .Values.kamino.drain.gracePeriod | quote }}
             - --max-history
             - {{ required "missing required kamino.imageHistory" .Values.kamino.imageHistory | quote }}
-            {{- if not (eq .Values.kamino.targetVMSS "ALL") }}
+                {{- if not (eq .Values.kamino.targetVMSS "ALL") }}
             - --target-vmss
             - {{ .Values.kamino.targetVMSS | quote }}
-            {{- end }}
+                {{- end }}
             - --last-patch-annotation
             - {{ required "missing requires kamino.auto.lastPatchAnnotation" .Values.kamino.auto.lastPatchAnnotation | quote }}
             - --pending-reboot-annotation
@@ -95,9 +95,9 @@ spec:
             - {{ .Values.kamino.auto.minimumCandidates | quote }}
             - --maximum-image-age
             - {{ .Values.kamino.auto.maximumImageAge | quote }}
-            {{- if .Values.kamino.auto.dryRun }}
+                {{- if .Values.kamino.auto.dryRun }}
             - --dry-run
-            {{- end }}
+                {{- end }}
             {{- else }}
             # Just a status run
             - status
