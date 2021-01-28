@@ -19,9 +19,12 @@ jobs:
       - uses: azure/login@v1
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
-      - name: set env
+      - name: assign tag based on manual input
         run: echo "RELEASE_VERSION=${{github.event.inputs.image_tag}}-canary" >> $GITHUB_ENV
         if: ${{github.event.inputs.image_tag != ''}}
+      - name: assign tag automatically based on current commit sha
+        run: echo "RELEASE_VERSION=$(git rev-parse --short "$GITHUB_SHA")-canary" >> $GITHUB_ENV
+        if: ${{github.event.inputs.image_tag == ''}}
       - name: setup buildx
         uses: docker/setup-buildx-action@v1
       - name: login to GitHub container registry
