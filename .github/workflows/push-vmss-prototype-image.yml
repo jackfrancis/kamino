@@ -5,6 +5,12 @@ on:
       image_tag:
         description: 'Identify image by this tag'
         required: true
+  pull_request:
+    paths:
+      - vmss-prototype/vmss-prototype
+      - Dockerfile
+    branches:
+      - main
 jobs:
   image:
     runs-on: ubuntu-latest
