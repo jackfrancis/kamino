@@ -4,7 +4,7 @@
 # docker build . -t vmss-prototype:testing
 # See smoketest.sh for examples of how I run locally
 
-FROM ubuntu:18.04
+FROM ubuntu:20.04
 
 RUN apt-get update && \
     apt-get install --yes --no-install-suggests --no-install-recommends --yes \
