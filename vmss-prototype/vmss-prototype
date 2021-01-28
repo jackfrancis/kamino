@@ -17,6 +17,7 @@ import time
 # This is what hooks to the Python bash autocomplete
 import argcomplete  # type: ignore
 
+# This comment should trigger a CI run
 
 def fatal_error(msg):
     """
