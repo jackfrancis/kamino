@@ -4,6 +4,11 @@ on:
   push:
     branches:
       - main
+    paths:
+      - helm/vmss-prototype/Chart.yaml
+      - helm/vmss-prototype/values.yaml
+      - helm/vmss-prototype/.helmignore
+      - helm/vmss-prototype/templates/**
 
 jobs:
   release:
