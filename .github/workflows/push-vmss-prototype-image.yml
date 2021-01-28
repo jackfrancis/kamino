@@ -44,6 +44,10 @@ jobs:
           echo "deb https://baltocdn.com/helm/stable/debian/ all main" | sudo tee /etc/apt/sources.list.d/helm-stable-debian.list
           sudo apt-get update
           sudo apt-get install helm
+      - name: install k
+        run: |
+          sudo curl -o /usr/local/bin/k https://raw.githubusercontent.com/jakepearson/k/master/k
+          sudo chmod +x /usr/local/bin/k
       - name: checkout aks-engine
         uses: actions/checkout@v2
         with:
@@ -64,7 +68,7 @@ jobs:
           TENANT_ID: ${{ secrets.TEST_AZURE_TENANT_ID }}
           USE_MANAGED_IDENTITY: false
           SKIP_LOGS_COLLECTION: true
-          CLEANUP_ON_EXIT: false
+          CLEANUP_ON_EXIT: true
           CLEANUP_IF_FAIL: false
           GINKGO_FOCUS: "should be able to install vmss node prototype"
           RUN_VMSS_NODE_PROTOTYPE: true
