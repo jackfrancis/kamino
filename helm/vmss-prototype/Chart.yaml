@@ -1,7 +1,7 @@
 apiVersion: v1
 description: A Helm chart for the Kamino vmss-prototype pattern image generator
 name: vmss-prototype
-version: 0.0.4
+version: 0.0.5
 maintainers:
   - name: Michael Sinz
     email: msinz@microsoft.com

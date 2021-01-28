@@ -8,9 +8,9 @@ kamino:
     # TODO:  Point these to our public container registry once we have it setup
     imageRegistry: ghcr.io
     imageRepository: jackfrancis/kamino/vmss-prototype
-    imageTag: v0.0.3
+    imageTag: v0.0.5
     # Pulling by hash has stronger assurance that the container is unchanged
-    imageHash: "a421ff768a798d581178626386c67117af2e2262dde334cef15d8f92df1a178f"
+    imageHash: "d154002ee4db8ca691357b7cc7ceb864d3e00f67a8a1be5554d749469d609c3f"
     pullByHash: true
 
     # include the name of the image pull secret in your cluster if you
@@ -51,6 +51,18 @@ kamino:
     # in ready state before you commit to picking one of them as a good
     # candidate.
     minimumCandidates: 1
+
+    # The maximum age of the current VMSS Prototype image before the auto
+    # node selection logic will try to find a new candate even if there
+    # has been no OS update/patch.  If set to 0, this no age is defined
+    # and thus the age is never considered.  Otherwise it is the number
+    # of days in age of the current image.  For example, if set to 7 days,
+    # once the current VMSS Prototype image is over 7 days old, the auto
+    # node selection process will not limit its node selection only to nodes
+    # that have an OS update/patch that is newer than the prior image.
+    # OS Updates/patches are always preferred but if the age is over the
+    # limit, an OS update/patch is not required.
+    maximumImageAge: 0
 
     # The annotation on a node that holds the last time a patch was
     # "applied"

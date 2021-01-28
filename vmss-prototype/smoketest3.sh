@@ -33,7 +33,9 @@ ${HELM3} upgrade --install ${DEPLOYMENT_NAME} ../helm/vmss-prototype \
     --set kamino.drain.force=true \
     --set kamino.targetVMSS=ALL \
     --set kamino.auto.lastPatchAnnotation=LatestOSPatch \
-    --set kamino.auto.pendingRebootAnnotation=PendingReboot
+    --set kamino.auto.pendingRebootAnnotation=PendingReboot \
+    --set kamino.auto.maximumImageAge=15 \
+    --set kamino.auto.dryRun=true
 
 kubectl get jobs --namespace ${NAMESPACE} --selector app=kamino-vmss-prototype
 
