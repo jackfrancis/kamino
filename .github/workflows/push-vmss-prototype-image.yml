@@ -8,7 +8,7 @@ on:
   pull_request:
     paths:
       - vmss-prototype/vmss-prototype
-      - Dockerfile
+      - vmss-prototype/Dockerfile
     branches:
       - main
 jobs:
