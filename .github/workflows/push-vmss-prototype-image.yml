@@ -66,7 +66,6 @@ jobs:
           CLIENT_SECRET: ${{ secrets.TEST_AZURE_SP_PW }}
           LOCATION: "westus2"
           TENANT_ID: ${{ secrets.TEST_AZURE_TENANT_ID }}
-          USE_MANAGED_IDENTITY: false
           SKIP_LOGS_COLLECTION: true
           CLEANUP_ON_EXIT: true
           CLEANUP_IF_FAIL: false
