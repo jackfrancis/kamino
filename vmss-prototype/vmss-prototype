@@ -965,7 +965,7 @@ def get_candidate_nodes(vmss, nodes, node_ignore_names, node_ignore_annotations,
                     ready_time = int(mktime_from_kubernetes(condition['lastHeartbeatTime']) - mktime_from_kubernetes(condition['lastTransitionTime']))
                 break
         if not ready_time:
-            logging.debug('IGNORED: Node {0} is not ready')
+            logging.debug('IGNORED: Node {0} is not ready'.format(node_name))
             continue
 
         if ready_time < minimum_ready_time:
