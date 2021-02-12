@@ -202,6 +202,16 @@ Kamino can follow some rules for automatic node selection.  These are the parame
 - `kamino.auto.dryRun` (optional - defaults to false)
   - If set to true, the auto-update process will only show what choices it made but not actually execute the update process.
 
+- `kamino.auto.cronjob.enabled` (optional - defaults to false)
+  - When set to true, will run auto-update job on a periodic basis.  This requires that you use the `kamino.targetVMSS` setting since cronjobs only make sense in automatic mode.
+  - This is how we recommend running Kamino
+
+- `kaminog.auto.cronjob.schedule` (optional - defaults to "`42 0 * * *`")
+  - This value only has meaning if cronjob is enabled
+  - Format of this value is [based on UNIX cron syntax](https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/#cron-schedule-syntax)
+  - Running this daily will result in only updating the image when there is a suitable candidate to become the new image.
+    - This is how you can have all of this running "lights out"
+
 ### Manual node selection
 
 When running lower level, you can manually select the node that will be used as the prototype.  Internally, this is what the automatic node selection runs after selecting the node.

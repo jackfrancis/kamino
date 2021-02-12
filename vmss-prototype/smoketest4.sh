@@ -8,14 +8,14 @@ HELM3=helm3
 # The namespace we want to deploy to
 NAMESPACE=default
 
-DEPLOYMENT_NAME=smoke-test3
+DEPLOYMENT_NAME=smoke-test4
 
 # Get rid of any prior version (just in case)
 ${HELM3} delete ${DEPLOYMENT_NAME} 2>/dev/null >/dev/null || true
 
 # A simple smoketest.  We name it "kamino-${DEPLOYMENT_NAME}" such that it
 # does not mix with the default jobs.  That name is use to help
-# define/identify the job and pods.
+# define/identify the cronjob and pods.
 
 # This has an override to the gracePeriod to be short and to force
 # the operation even if drain fails as we are testing the deployment
@@ -25,6 +25,9 @@ ${HELM3} delete ${DEPLOYMENT_NAME} 2>/dev/null >/dev/null || true
 # will only deploy to those pools that need it (updated OS patch/etc)
 # Since this is for testing, we set the log level to DEBUG
 # The annotations that are defined are from our test setup.
+# Note that the cronjob is set up to enabled and run every minute (!!)
+# This is to make this test work a bit faster.  The schedule could be
+# any valid cron schedule.
 ${HELM3} upgrade --install ${DEPLOYMENT_NAME} ../helm/vmss-prototype \
     --namespace ${NAMESPACE} \
     --set kamino.labels.app=${DEPLOYMENT_NAME} \
@@ -36,16 +39,22 @@ ${HELM3} upgrade --install ${DEPLOYMENT_NAME} ../helm/vmss-prototype \
     --set kamino.auto.lastPatchAnnotation=LatestOSPatch \
     --set kamino.auto.pendingRebootAnnotation=PendingReboot \
     --set kamino.auto.maximumImageAge=15 \
-    --set kamino.auto.dryRun=true
+    --set kamino.auto.dryRun=true \
+    --set kamino.auto.cronjob.enabled=true \
+    --set kamino.auto.cronjob.schedule="* * * * *"
 
-# Show the commands we are about to run
-set -x
-
-# Show the job...
-kubectl get jobs --namespace ${NAMESPACE} --selector app=${DEPLOYMENT_NAME}
+# Show the cronjob...
+(set -x; kubectl get cronjobs --namespace ${NAMESPACE} --selector app=${DEPLOYMENT_NAME})
 
 # Wait for the job to be ready
-kubectl wait --timeout 90s --for condition=Ready pods --namespace ${NAMESPACE} --selector app=${DEPLOYMENT_NAME}
+echo "...waiting for crontab to spawn the job and pod"
+while ! kubectl wait --timeout 90s --for condition=Ready pods --namespace ${NAMESPACE} --selector app=${DEPLOYMENT_NAME} >/dev/null 2>/dev/null; do sleep 1; done
+
+set -x
+
+# Show that jobs have been created
+kubectl get jobs --namespace ${NAMESPACE} --selector app=${DEPLOYMENT_NAME}
+
 
 # Note that I do this here knowing that it will never exit and that
 # I am just watching it start/etc.  That was the whole point.
@@ -53,3 +62,6 @@ kubectl get pods --namespace ${NAMESPACE} --selector app=${DEPLOYMENT_NAME} --ou
 
 # Now show the logs (with --follow which will run until the job completes)
 kubectl logs --timestamps --namespace ${NAMESPACE} --selector app=${DEPLOYMENT_NAME} --follow --tail 1000
+
+# Delete the cronjob now...
+${HELM3} delete ${DEPLOYMENT_NAME}

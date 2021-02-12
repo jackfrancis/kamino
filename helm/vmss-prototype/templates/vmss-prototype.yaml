@@ -1,9 +1,33 @@
 {{- if hasKey .Values "kamino" -}}
+
+# Pick our job name here
 {{- $jobName := printf "%s-%s" .Values.kamino.name "status" -}}
+{{- if hasKey .Values.kamino "targetVMSS" -}}
+{{- $jobName = printf "%s-%s" .Values.kamino.name "autoupdate" -}}
+{{- else -}}
 {{- if hasKey .Values.kamino "targetNode" -}}
 {{- $jobName = printf "%s-%s" .Values.kamino.name (substr 0 (int (sub (len .Values.kamino.targetNode) 6)) .Values.kamino.targetNode) -}}
 {{- end -}}
+{{- end -}}
 
+# If cronjob is enabled and we must have a targetVMSS...
+{{- if .Values.kamino.auto.cronjob.enabled }}
+apiVersion: batch/v1beta1
+kind: CronJob
+metadata:
+  name: {{ $jobName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ .Values.kamino.labels.app }}
+    kamino: {{ $jobName }}
+    helm/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+    targetVMSS: {{ required "Kamino cronjob requires setting targetVMSS" .Values.kamino.targetVMSS }}
+spec:
+  schedule: {{ .Values.kamino.auto.cronjob.schedule | quote }}
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+{{- else }}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -13,159 +37,176 @@ metadata:
     app: {{ .Values.kamino.labels.app }}
     kamino: {{ $jobName }}
     helm/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+    {{- if hasKey .Values.kamino "targetVMSS" }}
+    targetVMSS: {{ .Values.kamino.targetVMSS }}
+    {{- else }}
     {{- if hasKey .Values.kamino "targetNode" }}
     targetNode: {{ .Values.kamino.targetNode }}
     {{- end }}
+    {{- end }}
 spec:
-  template:
-    metadata:
-      labels:
-        app: {{ .Values.kamino.labels.app }}
-        kamino: {{ $jobName }}
-        helm/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
-        {{- if hasKey .Values.kamino "targetNode" }}
-        targetNode: {{ .Values.kamino.targetNode }}
-        {{- end }}
-    spec:
-      restartPolicy: Never
+{{- end }}
 
-      {{- if hasKey .Values.kamino.container "pullSecret" }}
-      imagePullSecrets:
-        - name: {{ .Values.kamino.container.pullSecret }}
-      {{- end}}
-
-      # We set up a required affinity run on a node that is
-      # note the target node we are about to shut down.
-      # (Only if we have a targetNode)
-      {{- if hasKey .Values.kamino "targetNode" }}
-      affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-            - matchFields:
-              - key: metadata.name
-                operator: NotIn
-                values:
-                - {{ .Values.kamino.targetNode }}
-      {{- end }}
-
-      containers:
-        - name: {{ .Values.kamino.name }}
-          image: {{ template "image.full" .Values.kamino.container }}
-          imagePullPolicy: {{ template "image.pull" .Values.kamino.container }}
-
-          command:
-            - vmss-prototype
-          args:
-            - --in-cluster
-            - --log-level
-            - {{ required "missing required kamino.logLevel" .Values.kamino.logLevel }}
-            {{- if hasKey .Values.kamino "targetNode" }}
-            # Use the target node as our source for the new prototype image
-            - update
-            - --target-node
-            - {{ .Values.kamino.targetNode | quote }}
-            - --new-updated-nodes
-            - {{ .Values.kamino.newUpdatedNodes | quote }}
-            - --grace-period
-            - {{ required "missing required kamino.drain.gracePeriod" .Values.kamino.drain.gracePeriod | quote }}
-            - --max-history
-            - {{ required "missing required kamino.imageHistory" .Values.kamino.imageHistory | quote }}
-            {{- else if hasKey .Values.kamino "targetVMSS" }}
-            - --log-prefix
-            - auto-update
-            - auto-update
-            - --new-updated-nodes
-            - {{ .Values.kamino.newUpdatedNodes | quote }}
-            - --grace-period
-            - {{ required "missing required kamino.drain.gracePeriod" .Values.kamino.drain.gracePeriod | quote }}
-            - --max-history
-            - {{ required "missing required kamino.imageHistory" .Values.kamino.imageHistory | quote }}
-            {{- if not (eq .Values.kamino.targetVMSS "ALL") }}
-            - --target-vmss
-            - {{ .Values.kamino.targetVMSS | quote }}
-            {{- end }}
-            - --last-patch-annotation
-            - {{ required "missing requires kamino.auto.lastPatchAnnotation" .Values.kamino.auto.lastPatchAnnotation | quote }}
-            - --pending-reboot-annotation
-            - {{ required "missing requires kamino.auto.pendingRebootAnnotation" .Values.kamino.auto.pendingRebootAnnotation | quote }}
-            - --minimum-ready-time
-            - {{ .Values.kamino.auto.minimumReadyTime | quote }}
-            - --minimum-candidates
-            - {{ .Values.kamino.auto.minimumCandidates | quote }}
-            - --maximum-image-age
-            - {{ .Values.kamino.auto.maximumImageAge | quote }}
-            {{- if .Values.kamino.auto.dryRun }}
-            - --dry-run
-            {{- end }}
+# This is indented like it is under either the Job.spec or CronJob.spec.jobTemplate.spec
+      template:
+        metadata:
+          labels:
+            app: {{ .Values.kamino.labels.app }}
+            kamino: {{ $jobName }}
+            helm/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+            {{- if hasKey .Values.kamino "targetVMSS" }}
+            targetVMSS: {{ .Values.kamino.targetVMSS }}
             {{- else }}
-            # Just a status run
-            - status
+            {{- if hasKey .Values.kamino "targetNode" }}
+            targetNode: {{ .Values.kamino.targetNode }}
             {{- end }}
+            {{- end }}
+        spec:
+          restartPolicy: Never
 
-          env:
-            # We use the in-cluster kubeconfig
-            - name: KUBECONFIG
-              value: /.kubeconfig
+          {{- if hasKey .Values.kamino.container "pullSecret" }}
+          imagePullSecrets:
+            - name: {{ .Values.kamino.container.pullSecret }}
+          {{- end}}
 
-            # This gets mapped here since the node has cloud local CA bundles we need
-            - name: REQUESTS_CA_BUNDLE
-              value: /etc/ssl/certs/ca-certificates.crt
+          # We set up a required affinity to run on a node that is
+          # not the target node we are about to shut down.
+          # (Only if we have a targetNode)
+          {{- if hasKey .Values.kamino "targetNode" }}
+          affinity:
+            nodeAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                nodeSelectorTerms:
+                - matchFields:
+                  - key: metadata.name
+                    operator: NotIn
+                    values:
+                    - {{ .Values.kamino.targetNode }}
+          {{- end }}
 
-            # Pass in the name of the node on which this pod is scheduled
-            # This is not actually used right now... will be in the future
-            - name: NODE_ID
-              valueFrom:
-                fieldRef:
-                  fieldPath: spec.nodeName
+          containers:
+            - name: {{ .Values.kamino.name }}
+              image: {{ template "image.full" .Values.kamino.container }}
+              imagePullPolicy: {{ template "image.pull" .Values.kamino.container }}
 
-          volumeMounts:
+              command:
+                - vmss-prototype
+              args:
+                - --in-cluster
+                - --log-level
+                - {{ required "missing required kamino.logLevel" .Values.kamino.logLevel }}
+
+                {{- if hasKey .Values.kamino "targetVMSS" }}
+                - --log-prefix
+                - auto-update
+                - auto-update
+                - --new-updated-nodes
+                - {{ .Values.kamino.newUpdatedNodes | quote }}
+                - --grace-period
+                - {{ required "missing required kamino.drain.gracePeriod" .Values.kamino.drain.gracePeriod | quote }}
+                - --max-history
+                - {{ required "missing required kamino.imageHistory" .Values.kamino.imageHistory | quote }}
+
+                {{- if not (eq .Values.kamino.targetVMSS "ALL") }}
+                - --target-vmss
+                - {{ .Values.kamino.targetVMSS | quote }}
+                {{- end }}
+
+                - --last-patch-annotation
+                - {{ required "missing requires kamino.auto.lastPatchAnnotation" .Values.kamino.auto.lastPatchAnnotation | quote }}
+                - --pending-reboot-annotation
+                - {{ required "missing requires kamino.auto.pendingRebootAnnotation" .Values.kamino.auto.pendingRebootAnnotation | quote }}
+                - --minimum-ready-time
+                - {{ .Values.kamino.auto.minimumReadyTime | quote }}
+                - --minimum-candidates
+                - {{ .Values.kamino.auto.minimumCandidates | quote }}
+                - --maximum-image-age
+                - {{ .Values.kamino.auto.maximumImageAge | quote }}
+
+                {{- if .Values.kamino.auto.dryRun }}
+                - --dry-run
+                {{- end }}
+
+                {{- else if hasKey .Values.kamino "targetNode" }}
+                # Use the target node as our source for the new prototype image
+                - update
+                - --target-node
+                - {{ .Values.kamino.targetNode | quote }}
+                - --new-updated-nodes
+                - {{ .Values.kamino.newUpdatedNodes | quote }}
+                - --grace-period
+                - {{ required "missing required kamino.drain.gracePeriod" .Values.kamino.drain.gracePeriod | quote }}
+                - --max-history
+                - {{ required "missing required kamino.imageHistory" .Values.kamino.imageHistory | quote }}
+
+                {{- else }}
+                # Just a status run
+                - status
+                {{- end }}
+
+              env:
+                # We use the in-cluster kubeconfig
+                - name: KUBECONFIG
+                  value: /.kubeconfig
+
+                # This gets mapped here since the node has cloud local CA bundles we need
+                - name: REQUESTS_CA_BUNDLE
+                  value: /etc/ssl/certs/ca-certificates.crt
+
+                # Pass in the name of the node on which this pod is scheduled
+                # This is not actually used right now... will be in the future
+                - name: NODE_ID
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: spec.nodeName
+
+              volumeMounts:
+                - name: host-sp
+                  mountPath: /etc/kubernetes
+                  readOnly: true
+                - name: kubectl
+                  mountPath: /usr/bin/kubectl
+                  readOnly: true
+                - name: kubeconfig
+                  mountPath: /.kubeconfig
+                  readOnly: true
+                - name: host-crt
+                  mountPath: /etc/ssl/certs/ca-certificates.crt
+                  readOnly: true
+
+          volumes:
             - name: host-sp
-              mountPath: /etc/kubernetes
-              readOnly: true
+              hostPath:
+                # this file contains the cluster specific details, including azure info
+                path: /etc/kubernetes
+                type: Directory
+
             - name: kubectl
-              mountPath: /usr/bin/kubectl
-              readOnly: true
+              hostPath:
+                path: /usr/local/bin/kubectl
+                type: File
+
             - name: kubeconfig
-              mountPath: /.kubeconfig
-              readOnly: true
+              hostPath:
+                path: /var/lib/kubelet/kubeconfig
+                type: File
+
             - name: host-crt
-              mountPath: /etc/ssl/certs/ca-certificates.crt
-              readOnly: true
+              hostPath:
+                path: /etc/ssl/certs/ca-certificates.crt
+                type: File
 
-      volumes:
-        - name: host-sp
-          hostPath:
-            # this file contains the cluster specific details, including azure info
-            path: /etc/kubernetes
-            type: Directory
-
-        - name: kubectl
-          hostPath:
-            path: /usr/local/bin/kubectl
-            type: File
-
-        - name: kubeconfig
-          hostPath:
-            path: /var/lib/kubelet/kubeconfig
-            type: File
-
-        - name: host-crt
-          hostPath:
-            path: /etc/ssl/certs/ca-certificates.crt
-            type: File
-
-      # Tolerate the AKS Engine control plane taint, to accommodate clusters with only one VMSS node
-      tolerations:
-      - key: node-role.kubernetes.io/master
-        operator: Equal
-        value: "true"
-        effect: NoSchedule
-      # We really only want linux nodes (this is of no use for Windows nodes)
-      nodeSelector:
-        # Optionally, require scheduling the pod onto a control plane VM using the AKS Engine control plane VM identifier
-        {{- if .Values.kamino.scheduleOnControlPlane }}
-        kubernetes.io/role: master
-        {{- end }}
-        beta.kubernetes.io/os: linux
+          # Tolerate the AKS Engine control plane taint, to accommodate clusters with only one VMSS node
+          tolerations:
+          - key: node-role.kubernetes.io/master
+            operator: Equal
+            value: "true"
+            effect: NoSchedule
+          # We really only want linux nodes (this is of no use for Windows nodes)
+          nodeSelector:
+            # Optionally, require scheduling the pod onto a control plane VM using the AKS Engine control plane VM identifier
+            {{- if .Values.kamino.scheduleOnControlPlane }}
+            kubernetes.io/role: master
+            {{- end }}
+            beta.kubernetes.io/os: linux
 {{- end }}
