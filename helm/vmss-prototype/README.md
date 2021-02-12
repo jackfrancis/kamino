@@ -209,6 +209,8 @@ Kamino can follow some rules for automatic node selection.  These are the parame
 - `kaminog.auto.cronjob.schedule` (optional - defaults to "`42 0 * * *`")
   - This value only has meaning if cronjob is enabled
   - Format of this value is [based on UNIX cron syntax](https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/#cron-schedule-syntax)
+    - Our default value is "Daily, 42 minutes after midnight"
+    - You can use web tools like [crontab.guru](https://crontab.guru/) to help generate crontab schedule expressions
   - Running this daily will result in only updating the image when there is a suitable candidate to become the new image.
     - This is how you can have all of this running "lights out"
 
