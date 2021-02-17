@@ -401,7 +401,6 @@ def image_tweaks(node_name):
                  "  - name: skyman-acr\n"
                  "  nodeSelector:\n"
                  "    kubernetes.io/hostname: '{3}'\n"
-                 "  priorityClassName: skyman-cluster-daemonset\n"
                  "  restartPolicy: Never\n"
                  "  tolerations:\n"
                  "  - effect: NoSchedule\n"
