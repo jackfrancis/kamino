@@ -160,6 +160,16 @@ spec:
                     fieldRef:
                       fieldPath: spec.nodeName
 
+                # Our namespace (to run our operation on)
+                - name: POD_NAMESPACE
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.namespace
+
+                # Our image - we use it for a quick fixup on a node
+                - name: POD_IMAGE
+                  value: {{ template "image.full" .Values.kamino.container }}
+
               volumeMounts:
                 - name: host-sp
                   mountPath: /etc/kubernetes
