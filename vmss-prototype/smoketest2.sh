@@ -44,6 +44,10 @@ ${HELM3} upgrade --install smoke-test ../helm/vmss-prototype \
 
 kubectl get jobs -lapp=kamino-vmss-prototype
 
-# Note that I do this here knowing that it will never exit and that
-# I am just watching it start/etc.  That was the whole point.
-kubectl get pods -o wide -lapp=kamino-vmss-prototype -w
+# We background start the watch on the pod and then wait for
+# the job to complete and then get the logs
+kubectl get pods -o wide -lapp=kamino-vmss-prototype -w &
+pod_watcher=$?
+kubectl wait jobs --for condition=Complete -lapp=kamino-vmss-prototype
+kubectl logs -lapp=kamino-vmss-prototype --tail 9999 --timestamps --follow
+kill ${pod_watcher}
