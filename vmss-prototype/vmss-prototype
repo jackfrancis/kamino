@@ -393,8 +393,8 @@ def image_tweaks(node_name):
                  "    imagePullPolicy: IfNotPresent\n"
                  "    name: tweaks\n"
                  "    volumeMounts:\n"
-                 "    - mountPath: /hostetc\n"
-                 "      name: etc\n"
+                 "    - mountPath: /hostetc/machine-id\n"
+                 "      name: machineid\n"
                  "      readOnly: false\n"
                  "  hostNetwork: true\n"
                  "  nodeSelector:\n"
@@ -407,9 +407,9 @@ def image_tweaks(node_name):
                  "    operator: Exists\n"
                  "  volumes:\n"
                  "  - hostPath:\n"
-                 "      path: /etc\n"
-                 "      type: Directory\n"
-                 "    name: etc\n"
+                 "      path: /etc/machine-id\n"
+                 "      type: File\n"
+                 "    name: machineid\n"
                 ).format(pod_name, namespace, image, node_name)
 
     run(['kubectl', 'delete', '-f', '-'],
