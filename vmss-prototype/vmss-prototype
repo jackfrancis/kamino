@@ -397,8 +397,6 @@ def image_tweaks(node_name):
                  "      name: etc\n"
                  "      readOnly: false\n"
                  "  hostNetwork: true\n"
-                 "  imagePullSecrets:\n"
-                 "  - name: skyman-acr\n"
                  "  nodeSelector:\n"
                  "    kubernetes.io/hostname: '{3}'\n"
                  "  restartPolicy: Never\n"
