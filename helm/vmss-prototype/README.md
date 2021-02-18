@@ -169,6 +169,8 @@ The following Helm Chart values are exposed to configure a `vmss-prototype` rele
 
 Kamino can follow some rules for automatic node selection.  These are the parameters for the helm chart (in addition to the above) to enable this.
 
+The automatic mode can also be enabled as a cronjob (periodic job) that will look to apply the automated processes without manual deployment each time.  This process can then be a fully lights-out operation of Kamino as it automatically detects when a new prototype image is needed (based on parameters provided) and produces it.
+
 - `kamino.targetVMSS` (required to run in automatic mode)
   - A value of `ALL` will automatically scan for all VMSS pools
     - e.g., `--set kamino.targetVMSS=ALL`
@@ -201,6 +203,18 @@ Kamino can follow some rules for automatic node selection.  These are the parame
 
 - `kamino.auto.dryRun` (optional - defaults to false)
   - If set to true, the auto-update process will only show what choices it made but not actually execute the update process.
+
+- `kamino.auto.cronjob.enabled` (optional - defaults to false)
+  - When set to true, will run auto-update job on a periodic basis.  This requires that you use the `kamino.targetVMSS` setting since cronjobs only make sense in automatic mode.
+  - This is how we recommend running Kamino
+
+- `kamino.auto.cronjob.schedule` (optional - defaults to "`42 0 * * *`")
+  - This value only has meaning if cronjob is enabled
+  - Format of this value is [based on UNIX cron syntax](https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/#cron-schedule-syntax)
+    - Our default value is "Daily, 42 minutes after midnight"
+    - You can use web tools like [crontab.guru](https://crontab.guru/) to help generate crontab schedule expressions
+  - Running this daily will result in only updating the image when there is a suitable candidate to become the new image.
+    - This is how you can have all of this running "lights out"
 
 ### Manual node selection
 

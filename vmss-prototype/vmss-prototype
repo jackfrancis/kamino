@@ -352,6 +352,109 @@ def get_vmss_images(subscription, resource_group, sig_name, image_definition):
     return json.loads(output)
 
 
+def image_tweaks(node_name):
+    """
+    If we have the information needed, do our image tweaks pod on the
+    target node.  This runs as a one-shot pod that will address image
+    tweaks.  Currently, that is only 1 item - the /etc/machine-id must
+    be emptied (but not deleted) such that a new unique machine-id can
+    be created for each new node.
+    The yaml specifically supports running on a cordoned node and it
+    also specifically calls out the node in question.
+    :param node_name:  The node, after it has been drained but it is still up
+    :returns: True if the tweaks were successfully deployed
+    """
+    namespace = os.getenv('POD_NAMESPACE', None)
+    if not namespace:
+        logging.info('No POD_NAMESPACE defined, can not do image tweaks')
+        return False
+
+    image = os.getenv('POD_IMAGE', None)
+    if not image:
+        logging.info('No POD_IMAGE defined, can not do image tweaks')
+        return False
+
+    pod_name = 'vmss-prototype-tweaks-{0}'.format(node_name)
+
+    # This is a pod yaml for our image tweak we will do on the target node
+    # that will be our new prototype image.
+    yaml_text = ("apiVersion: v1\n"
+                 "kind: Pod\n"
+                 "metadata:\n"
+                 "  name: '{0}'\n"
+                 "  namespace: '{1}'\n"
+                 "spec:\n"
+                 "  containers:\n"
+                 "  - command:\n"
+                 "    - /bin/cp\n"
+                 "    - /dev/null\n"
+                 "    - /hostetc/machine-id\n"
+                 "    image: '{2}'\n"
+                 "    imagePullPolicy: IfNotPresent\n"
+                 "    name: tweaks\n"
+                 "    volumeMounts:\n"
+                 "    - mountPath: /hostetc/machine-id\n"
+                 "      name: machineid\n"
+                 "      readOnly: false\n"
+                 "  hostNetwork: true\n"
+                 "  nodeSelector:\n"
+                 "    kubernetes.io/hostname: '{3}'\n"
+                 "  restartPolicy: Never\n"
+                 "  tolerations:\n"
+                 "  - effect: NoSchedule\n"
+                 "    operator: Exists\n"
+                 "  - effect: NoExecute\n"
+                 "    operator: Exists\n"
+                 "  volumes:\n"
+                 "  - hostPath:\n"
+                 "      path: /etc/machine-id\n"
+                 "      type: File\n"
+                 "    name: machineid\n"
+                ).format(pod_name, namespace, image, node_name)
+
+    run(['kubectl', 'delete', '-f', '-'],
+        stdin=yaml_text,
+        retries=3,
+        check=False,
+        retry_func=not_found_no_retry,
+        comment='Deleting {0} (just in case)'.format(pod_name)
+        )
+    _, _, rc = run(['kubectl', 'create', '-f', '-'],
+                   stdin=yaml_text,
+                   retries=3,
+                   check=False,
+                   comment='Creating {0}'.format(pod_name)
+                   )
+
+    if rc:
+        logging.info('Could not successfully deploy the image tweaks')
+        return False
+
+    # We use this to watch for the pod to complete.  Unfortunately there is
+    # no condition for completed so the kubectl wait command can not work
+    # here and trying to use it for Ready ends up in a race with completion.
+    # Thus, we use the logs method.  Not as pretty but it works.
+    run(['kubectl', 'logs',
+         '--namespace', namespace,
+         '--follow',
+         pod_name
+         ],
+         retries=6,
+         check=False,
+         comment='Waiting for {0} to complete'.format(pod_name)
+         )
+
+    run(['kubectl', 'delete', '-f', '-'],
+        stdin=yaml_text,
+        retries=3,
+        check=False,
+        retry_func=not_found_no_retry,
+        comment='Deleting {0}'.format(pod_name)
+        )
+
+    return True
+
+
 def vmss_prototype_collect_status(sub_args):
     """
     Gather information about VMSS Prototype deployment in the cluster
@@ -720,6 +823,11 @@ def vmss_prototype_update(sub_args):
                                  '--namespace', namespace,
                                  pod
                                  ], retries=3, check=False, retry_func=not_found_no_retry)
+
+                # Now apply the image tweaks that we want.  Note that this
+                # works because the yaml we build allows it to run on cordoned
+                # nodes.
+                image_tweaks(target_node)
 
                 # Stop the VM now (deallocate it such that the disk image can be accessed)
                 run(az(['vmss', 'deallocate'], subscription) + [

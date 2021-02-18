@@ -72,7 +72,23 @@ kamino:
     # pending a servicing reboot.  We don't want pending reboot nodes
     #pendingRebootAnnotation: weave.works/kured-reboot-in-progress
 
+    # Set this to true such that auto-updates will only show what they
+    # would have done without actually doing it
     dryRun: false
+
+    # If you are running in "automatic mode" you likely will want to have this
+    # run periodically (a cron job).  This only takes effect if you have set
+    # targetVMSS and kamino.auto.cronjob.enabled is true
+    cronjob:
+      enabled: false
+
+      # This is the schedule in standard cron syntax.  Note that the job will
+      # only be running one at a time.  In some of my clusters, I run this every
+      # hour.
+      #schedule: "42 * * * *"
+
+      # A reasonable default is to do it every day.  (Obviously, only if enalbed)
+      schedule: "42 0 * * *"
 
   # This is the log-level for the process via python logging.
   # Each level includes all below it, so DEBUG includes INFO, WARNING, etc...
