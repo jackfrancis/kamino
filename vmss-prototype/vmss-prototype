@@ -412,12 +412,19 @@ def image_tweaks(node_name):
                  "    name: etc\n"
                 ).format(pod_name, namespace, image, node_name)
 
-    run(['kubectl', 'delete', 'pod',
-         '--namespace', namespace,
-         pod_name
-         ], check=False)
-
-    _, _, rc = run(['kubectl', 'create', '-f', '-'], stdin=yaml_text, retries=3, check=False)
+    run(['kubectl', 'delete', '-f', '-'],
+        stdin=yaml_text,
+        retries=3,
+        check=False,
+        retry_func=not_found_no_retry,
+        comment='Deleting {0} (just in case)'.format(pod_name)
+        )
+    _, _, rc = run(['kubectl', 'create', '-f', '-'],
+                   stdin=yaml_text,
+                   retries=3,
+                   check=False,
+                   comment='Creating {0}'.format(pod_name)
+                   )
 
     if rc:
         logging.info('Could not successfully deploy the image tweaks')
@@ -431,12 +438,19 @@ def image_tweaks(node_name):
          '--namespace', namespace,
          '--follow',
          pod_name
-         ], retries=6, check=False)
+         ],
+         retries=6,
+         check=False,
+         comment='Waiting for {0} to complete'.format(pod_name)
+         )
 
-    run(['kubectl', 'delete', 'pod',
-         '--namespace', namespace,
-         pod_name
-         ], check=False)
+    run(['kubectl', 'delete', '-f', '-'],
+        stdin=yaml_text,
+        retries=3,
+        check=False,
+        retry_func=not_found_no_retry,
+        comment='Deleting {0}'.format(pod_name)
+        )
 
     return True
 

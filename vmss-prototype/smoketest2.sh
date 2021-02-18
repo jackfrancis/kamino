@@ -48,6 +48,6 @@ kubectl get jobs -lapp=kamino-vmss-prototype
 # the job to complete and then get the logs
 kubectl get pods -o wide -lapp=kamino-vmss-prototype -w &
 pod_watcher=$?
-kubectl wait jobs --for condition=Complete -lapp=kamino-vmss-prototype
+kubectl wait jobs --for condition=Complete -lapp=kamino-vmss-prototype --timeout 600s
 kubectl logs -lapp=kamino-vmss-prototype --tail 9999 --timestamps --follow
 kill ${pod_watcher}
