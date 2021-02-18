@@ -207,7 +207,6 @@ Kamino can follow some rules for automatic node selection.  These are the parame
   - This is how we recommend running Kamino
 
 - `kamino.auto.cronjob.schedule` (optional - defaults to "`42 0 * * *`")
-
   - This value only has meaning if cronjob is enabled
   - Format of this value is [based on UNIX cron syntax](https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/#cron-schedule-syntax)
     - Our default value is "Daily, 42 minutes after midnight"
