@@ -169,6 +169,8 @@ The following Helm Chart values are exposed to configure a `vmss-prototype` rele
 
 Kamino can follow some rules for automatic node selection.  These are the parameters for the helm chart (in addition to the above) to enable this.
 
+The automatic mode can also be enabled as a cronjob (periodic job) that will look to apply the automated processes without manual deployment each time.  This process can then be a fully lights-out operation of Kamino as it automatically detects when a new prototype image is needed (based on parameters provided) and produces it.
+
 - `kamino.targetVMSS` (required to run in automatic mode)
   - A value of `ALL` will automatically scan for all VMSS pools
     - e.g., `--set kamino.targetVMSS=ALL`
