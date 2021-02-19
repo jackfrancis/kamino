@@ -87,5 +87,6 @@ jobs:
           RUN_VMSS_NODE_PROTOTYPE: true
           KAMINO_VMSS_PROTOTYPE_LOCAL_CHART_PATH: ${{ github.workspace }}/helm/vmss-prototype
           KAMINO_VMSS_PROTOTYPE_DRY_RUN: ${{ env.DRY_RUN }}
+          AZURE_CORE_ONLY_SHOW_ERRORS: True
         run: make test-kubernetes
         working-directory: aks-engine
