@@ -5,7 +5,7 @@ on:
       image_tag:
         description: 'Identify image by this tag'
         required: true
-  pull_request:
+  pull_request_target:
     paths:
       - vmss-prototype/vmss-prototype
       - vmss-prototype/Dockerfile
@@ -81,5 +81,6 @@ jobs:
           GINKGO_FOCUS: "should be able to install vmss node prototype"
           RUN_VMSS_NODE_PROTOTYPE: true
           KAMINO_VMSS_PROTOTYPE_IMAGE_TAG: ${{ env.RELEASE_VERSION }}
+          AZURE_CORE_ONLY_SHOW_ERRORS: True
         run: make test-kubernetes
         working-directory: aks-engine

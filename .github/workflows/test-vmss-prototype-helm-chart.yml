@@ -6,7 +6,7 @@ on:
         description: 'Perform dry run?'
         required: true
         default: 'true'
-  pull_request:
+  pull_request_target:
     paths:
       - helm/vmss-prototype/Chart.yaml
       - helm/vmss-prototype/values.yaml
@@ -87,5 +87,6 @@ jobs:
           RUN_VMSS_NODE_PROTOTYPE: true
           KAMINO_VMSS_PROTOTYPE_LOCAL_CHART_PATH: ${{ github.workspace }}/helm/vmss-prototype
           KAMINO_VMSS_PROTOTYPE_DRY_RUN: ${{ env.DRY_RUN }}
+          AZURE_CORE_ONLY_SHOW_ERRORS: True
         run: make test-kubernetes
         working-directory: aks-engine
