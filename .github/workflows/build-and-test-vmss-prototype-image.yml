@@ -5,7 +5,7 @@ on:
       image_tag:
         description: 'Identify image by this tag'
         required: true
-  pull_request:
+  pull_request_target:
     paths:
       - vmss-prototype/vmss-prototype
       - vmss-prototype/Dockerfile

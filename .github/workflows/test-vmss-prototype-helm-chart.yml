@@ -6,7 +6,7 @@ on:
         description: 'Perform dry run?'
         required: true
         default: 'true'
-  pull_request:
+  pull_request_target:
     paths:
       - helm/vmss-prototype/Chart.yaml
       - helm/vmss-prototype/values.yaml
