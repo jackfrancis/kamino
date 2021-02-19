@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@v2
       - uses: azure/login@v1
         with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          credentials: ${{ secrets.AZURE_CREDENTIALS }}
       - name: assign tag automatically based on current commit sha
         run: echo "RELEASE_VERSION=$(git rev-parse --short "$GITHUB_SHA")-canary" >> $GITHUB_ENV
       - name: assign dry run config on manual input
