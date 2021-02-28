@@ -361,8 +361,10 @@ def image_tweaks(node_name):
     be created for each new node.
     The yaml specifically supports running on a cordoned node and it
     also specifically calls out the node in question.
+    *NOTE*  The node will be shut down as part of this operation.  It will
+    power off directly.
     :param node_name:  The node, after it has been drained but it is still up
-    :returns: True if the tweaks were successfully deployed
+    :returns: True if the tweaks were successfully deployed and node is shut down
     """
     namespace = os.getenv('POD_NAMESPACE', None)
     if not namespace:
@@ -376,6 +378,23 @@ def image_tweaks(node_name):
 
     pod_name = 'vmss-prototype-tweaks-{0}'.format(node_name)
 
+    # Why this bit of complexity?
+    # Well, we need this to be just a pod as it will suddenly fail in a strange
+    # and very important way - the node will be shut down.
+    # Why?  Well, we have to clear out the machine-id and keep it cleaned out
+    # while the node shuts down.  However, the normal Azure node deallocation
+    # process actually causes the machine-id to be regenerated.  We have to
+    # force a poweroff after writing the file such that no service rewrites the
+    # file as it is being shut down.
+    # However, this happens so quickly that the master node may not have gotten
+    # the details as to the fact that the pod even started to run, so we have to
+    # do a small sleep before doing the dirty deed.
+    # We then notice that this is running and assume we can then, after a few
+    # seconds, delete the pod such that kubernetes does not think about it again.
+    # We don't actually need to do that if the node is deleted as that will delete
+    # the pod (since there is no controller to create another)
+    # However, it is nice to clean up after onself.
+
     # This is a pod yaml for our image tweak we will do on the target node
     # that will be our new prototype image.
     yaml_text = ("apiVersion: v1\n"
@@ -386,17 +405,19 @@ def image_tweaks(node_name):
                  "spec:\n"
                  "  containers:\n"
                  "  - command:\n"
-                 "    - /bin/cp\n"
-                 "    - /dev/null\n"
-                 "    - /hostetc/machine-id\n"
+                 "    - /usr/bin/nsenter\n"
+                 "    - -m/proc/1/ns/mnt\n"
+                 "    - '--'\n"
+                 "    - /bin/sh\n"
+                 "    - -xc\n"
+                 "    - '/bin/sleep 2; /bin/cp /dev/null /etc/machine-id; /bin/systemctl poweroff --force --message=VMSS-Prototype'\n"
                  "    image: '{2}'\n"
                  "    imagePullPolicy: IfNotPresent\n"
                  "    name: tweaks\n"
-                 "    volumeMounts:\n"
-                 "    - mountPath: /hostetc/machine-id\n"
-                 "      name: machineid\n"
-                 "      readOnly: false\n"
+                 "    securityContext:\n"
+                 "      privileged: true\n"
                  "  hostNetwork: true\n"
+                 "  hostPID: true\n"
                  "  nodeSelector:\n"
                  "    kubernetes.io/hostname: '{3}'\n"
                  "  restartPolicy: Never\n"
@@ -405,11 +426,6 @@ def image_tweaks(node_name):
                  "    operator: Exists\n"
                  "  - effect: NoExecute\n"
                  "    operator: Exists\n"
-                 "  volumes:\n"
-                 "  - hostPath:\n"
-                 "      path: /etc/machine-id\n"
-                 "      type: File\n"
-                 "    name: machineid\n"
                 ).format(pod_name, namespace, image, node_name)
 
     run(['kubectl', 'delete', '-f', '-'],
@@ -430,27 +446,33 @@ def image_tweaks(node_name):
         logging.info('Could not successfully deploy the image tweaks')
         return False
 
-    # We use this to watch for the pod to complete.  Unfortunately there is
-    # no condition for completed so the kubectl wait command can not work
-    # here and trying to use it for Ready ends up in a race with completion.
-    # Thus, we use the logs method.  Not as pretty but it works.
-    run(['kubectl', 'logs',
-         '--namespace', namespace,
-         '--follow',
-         pod_name
-         ],
-         retries=6,
-         check=False,
-         comment='Waiting for {0} to complete'.format(pod_name)
-         )
+    # The pod will run rather quickly and then the node will shutdown.
+    # We can't depend on being able to talk to the node but we can get the
+    # phase of the pod.  The retries are just to cover the time to pull
+    # the container.  60 here means we at most wait 5 minutes for the pull
+    # and run state - just in case.  Rarely see this hit more than a small
+    # number of iterations.
+    retries = 60
+    phase = 'unknown'
+    while phase not in ['Running', 'Succeeded', 'Failed'] and retries > 0:
+        phase, _, _ = run(['kubectl', 'get', 'pod',
+                           '--namespace', namespace,
+                           '--output', 'jsonpath={.status.phase}',
+                           pod_name
+                           ], check=False)
+        # This should be at least twice the value used above such that
+        # we can see that the pod has started and have waited a small bit
+        # before deleting it.  We sleep 2 seconds above, so this 5 seconds
+        # covers it.
+        time.sleep(5)
+        retries = retries - 1
 
-    run(['kubectl', 'delete', '-f', '-'],
-        stdin=yaml_text,
-        retries=3,
-        check=False,
-        retry_func=not_found_no_retry,
-        comment='Deleting {0}'.format(pod_name)
-        )
+    run(['kubectl', 'delete', 'pods',
+         '--namespace', namespace,
+         '--grace-period', 0,
+         '--force',
+         pod_name
+         ], retries=3, check=False)
 
     return True
 
