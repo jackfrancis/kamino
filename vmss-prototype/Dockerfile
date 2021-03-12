@@ -7,7 +7,8 @@
 FROM ubuntu:20.04
 
 RUN apt-get update && \
-    apt-get install --yes --no-install-suggests --no-install-recommends --yes \
+    apt-get upgrade --yes && \
+    apt-get install --no-install-suggests --no-install-recommends --yes \
         apt-transport-https \
         ca-certificates \
         curl \
