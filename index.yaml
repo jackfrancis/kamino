@@ -2,6 +2,27 @@ apiVersion: v1
 entries:
   vmss-prototype:
   - apiVersion: v1
+    created: "2021-03-12T17:15:21.581561835Z"
+    description: A Helm chart for the Kamino vmss-prototype pattern image generator
+    digest: 9c5688db15cff10a3e11f633d386f34161a3910733b092b51e30c651aa821325
+    home: https://github.com/jackfrancis/kamino/README.md
+    keywords:
+    - vmss
+    - azure
+    - kubernetes
+    - kamino
+    maintainers:
+    - email: msinz@microsoft.com
+      name: Michael Sinz
+    - email: jackfrancis@gmail.com
+      name: Jack Francis
+    name: vmss-prototype
+    sources:
+    - https://github.com/jackfrancis/kamino
+    urls:
+    - https://github.com/jackfrancis/kamino/releases/download/vmss-prototype-0.0.10/vmss-prototype-0.0.10.tgz
+    version: 0.0.10
+  - apiVersion: v1
     created: "2021-03-01T18:56:56.136699729Z"
     description: A Helm chart for the Kamino vmss-prototype pattern image generator
     digest: e0fea5a4428b19226299508fc9c8c64dcd986f723b1f9824f423eee128780a5a
