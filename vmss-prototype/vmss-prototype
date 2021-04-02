@@ -1,6 +1,4 @@
 #!/usr/bin/env python
-# PYTHON_ARGCOMPLETE_OK
-# The token above is necessary for Python bash auto-complete trigger
 # pylint: disable=line-too-long
 
 import argparse
@@ -13,9 +11,6 @@ import subprocess
 import sys
 import threading
 import time
-
-# This is what hooks to the Python bash autocomplete
-import argcomplete  # type: ignore
 
 
 def fatal_error(msg):
@@ -386,14 +381,51 @@ def image_tweaks(node_name):
     # process actually causes the machine-id to be regenerated.  We have to
     # force a poweroff after writing the file such that no service rewrites the
     # file as it is being shut down.
+    # We also need to clean out some files for cloud-init (azure) such that it
+    # does not think it was a prior instance.
     # However, this happens so quickly that the master node may not have gotten
     # the details as to the fact that the pod even started to run, so we have to
     # do a small sleep before doing the dirty deed.
     # We then notice that this is running and assume we can then, after a few
     # seconds, delete the pod such that kubernetes does not think about it again.
-    # We don't actually need to do that if the node is deleted as that will delete
-    # the pod (since there is no controller to create another)
-    # However, it is nice to clean up after onself.
+    # We also delete some of the cloud init data such that the node does not
+    # think it "existed" before - this removes the problem with IDNS/DDNS where
+    # the node sends a signal that it "used to be" another node and to undo that
+    # DNS entry.
+    # Finally, we also append to /var/log/ancestry.log such that we can, in each
+    # node, know the genetic ancestry of the node.  (Actually do that first)
+
+    # To make it easier to read, the commands are here with ';' separation
+    # NOTE: do not use single quotes within these strings
+    cleanup_commands = ';'.join([
+        # Give kubernetes a few moments to notice we are running
+        # as the rest of this stuff really just happens quickly
+        '/bin/sleep 4',
+        '/bin/echo "$(/bin/date) VMSS-Prototype Donor: $(/bin/hostname)" >> /var/log/ancestry.log',
+        # Multiple lines so it is easier to read all of the different
+        # items we are cleaning up (removing)
+        '/bin/rm -rf'
+            # Our host name is not really ours in a prototype - clear it out
+            ' /etc/hostname'
+            # All of this cloud init data needs to be fresh too
+            ' /var/lib/cloud/data/*'
+            ' /var/lib/cloud/instance'
+            # Finally, this is just cleanup to prevent build up
+            # of garbage that can slow things down
+            ' /var/lib/cloud/instances/*'
+            ' /var/lib/waagent/history/*'
+            ' /var/lib/waagent/events/*'
+            # or have goals that are no longer valid
+            ' /var/lib/waagent/ExtensionsConfig.*.xml'
+            ' /var/lib/waagent/GoalState.*.xml'
+            ' /var/lib/waagent/*.manifest.xml'
+            '',
+        # Update an ancestry.log
+        # This forces the machine-id to be re-issued
+        '/bin/cp /dev/null /etc/machine-id',
+        # Finally, we need to power off now
+        '/bin/systemctl poweroff --force --message=VMSS-Prototype'
+    ])
 
     # This is a pod yaml for our image tweak we will do on the target node
     # that will be our new prototype image.
@@ -410,7 +442,7 @@ def image_tweaks(node_name):
                  "    - '--'\n"
                  "    - /bin/sh\n"
                  "    - -xc\n"
-                 "    - '/bin/sleep 2; /bin/cp /dev/null /etc/machine-id; /bin/systemctl poweroff --force --message=VMSS-Prototype'\n"
+                 "    - '{4}'\n"
                  "    image: '{2}'\n"
                  "    imagePullPolicy: IfNotPresent\n"
                  "    name: tweaks\n"
@@ -426,7 +458,7 @@ def image_tweaks(node_name):
                  "    operator: Exists\n"
                  "  - effect: NoExecute\n"
                  "    operator: Exists\n"
-                ).format(pod_name, namespace, image, node_name)
+                ).format(pod_name, namespace, image, node_name, cleanup_commands)
 
     run(['kubectl', 'delete', '-f', '-'],
         stdin=yaml_text,
@@ -449,10 +481,10 @@ def image_tweaks(node_name):
     # The pod will run rather quickly and then the node will shutdown.
     # We can't depend on being able to talk to the node but we can get the
     # phase of the pod.  The retries are just to cover the time to pull
-    # the container.  60 here means we at most wait 5 minutes for the pull
+    # the container.  40 here means we at most wait 5 minutes for the pull
     # and run state - just in case.  Rarely see this hit more than a small
     # number of iterations.
-    retries = 60
+    retries = 40
     phase = 'unknown'
     while phase not in ['Running', 'Succeeded', 'Failed'] and retries > 0:
         phase, _, _ = run(['kubectl', 'get', 'pod',
@@ -462,9 +494,9 @@ def image_tweaks(node_name):
                            ], check=False)
         # This should be at least twice the value used above such that
         # we can see that the pod has started and have waited a small bit
-        # before deleting it.  We sleep 2 seconds above, so this 5 seconds
+        # before deleting it.  We sleep 4 seconds above, so this 8 seconds
         # covers it.
-        time.sleep(5)
+        time.sleep(8)
         retries = retries - 1
 
     run(['kubectl', 'delete', 'pods',
@@ -869,31 +901,39 @@ def vmss_prototype_update(sub_args):
                                    ], retries=6)
                 snapshot = json.loads(output)
 
-                # Delete the instance to prevent idns side-effects from future VMs coming online based on its prototype
-                # See https://github.com/jackfrancis/kamino/issues/26
-                stdout, stderr, exit_code = run(az(['vmss', 'delete-instances'], subscription) + [
+                # NOTE:  In certain versions of aks-engine, restarting a VM after
+                # it was deallocated will cause cloud-init to write an empty
+                # azure.json file but the aks-engine CSE will not write the
+                # correct one as it thinks the node is all ready to run.
+                # For those cases, this start will leave the node un-responsive
+                # and it would need a "reimage" (or even better, reimage after
+                # the prototype image was created and set up successfully)
+                # Even in those specific aks-engine versions, it only causes
+                # a problem when the VM instance has not yet been a prototype
+                # based instance.  Once it is a prototype based instance, this
+                # no longer is a problem.  So we can just ignore this here as
+                # this only impacts certain aks-engine versions and only for the
+                # nodes that had not yet transitioned to a vmss-prototype
+                # All aks-engine versions 0.57.0 or later have this fixed.
+                stdout, stderr, exit_code = run(az(['vmss', 'start'], subscription) + [
                     '--resource-group', resource_group,
                     '--name', vmss,
                     '--instance-ids', instance_id,
                     '--no-wait'
                     ], retries=3, check=False, retry_func=not_found_no_retry)
-                if exit_code == 0:
-                    nodeDeleted = True
 
             finally:
-                if not nodeDeleted:
-                    # Let it be a productive member of the cluster again
-                    # We ignore errors here since the VM may no longer exist
-                    # We best-effort uncordon it.
-                    run(['kubectl', 'uncordon',
-                        target_node
-                        ], retries=3, check=False, retry_func=not_found_no_retry)
+                # Let it be a productive member of the cluster again
+                # We best-effort uncordon it.
+                run(['kubectl', 'uncordon',
+                    target_node
+                    ], retries=3, check=False, retry_func=not_found_no_retry)
 
-                    # Allow the cluster from scaling away the node...
-                    run(['kubectl', 'annotate', 'node',
-                        target_node,
-                        'cluster-autoscaler.kubernetes.io/scale-down-disabled-'
-                        ], retries=3, check=False, retry_func=not_found_no_retry)
+                # Allow the cluster from scaling away the node if it wishes
+                run(['kubectl', 'annotate', 'node',
+                    target_node,
+                    'cluster-autoscaler.kubernetes.io/scale-down-disabled-'
+                    ], retries=3, check=False, retry_func=not_found_no_retry)
 
         # Build the image version from the snapshow we have
         output = vmss_build_sig_image(subscription, resource_group, sig_name, image_definition, version, snapshot)
@@ -1612,9 +1652,6 @@ def main():
     register_commands(subparser)
 
     set_better_help(subparser)
-
-    # Enable command line auto-complete support
-    argcomplete.autocomplete(parser)
 
     # Parse the arguments
     cmd_line_args = parser.parse_args()
