@@ -914,6 +914,7 @@ def vmss_prototype_update(sub_args):
                 # no longer is a problem.  So we can just ignore this here as
                 # this only impacts certain aks-engine versions and only for the
                 # nodes that had not yet transitioned to a vmss-prototype
+                # All aks-engine versions 0.57.0 or later have this fixed.
                 stdout, stderr, exit_code = run(az(['vmss', 'start'], subscription) + [
                     '--resource-group', resource_group,
                     '--name', vmss,
