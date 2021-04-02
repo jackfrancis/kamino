@@ -1,4 +1,4 @@
-# Manual Update
+# Auto Update
 
 This is a higher level description of the basic functions of the VMSS-Prototype Pattern (Kamino) system.  This goes into deep details as to what you are doing on the machine.
 

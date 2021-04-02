@@ -55,7 +55,9 @@ the full solution.
 
 Step 2 is very much dependent on step 1 - there are bits of data or annotations
 that are needed to automatically reason about which node is most suited to
-becoming the prototype pattern node.
+becoming the prototype pattern node.  We have, a mechanism that is a
+reasonable base implementation of Step 2 in the code based on the rules
+with attributes as we have stated them.
 
 Step 3 is the part that no one (or no one we know of) has.  This part can
 be used, in the worst case, by someone manually selecting the target node.
@@ -68,6 +70,13 @@ Yes - our goal is to bring steps 1 and 2 as pluggable elements such that
 each of them could be replaced with their own implementations.  Our goal
 is to have a basic reference implementation of all 3 components.
 
+With the latest changes to the open source [Kured](https://github.com/weaveworks/kured)
+tool, we now have a baseline of step 1 plus our [Kamino auto update](../helm/vmss-prototype/auto-update.md) for
+step 2 and 3.
+
 Our hope is that these components are composable and replaceable as needed.
-Again, the big push with doing step 3 first is that we feel that is the
-most critical and unique component right now.
+Again, the big push was doing step 3 first in that we felt that was the
+most critical and unique component.  Having our step 2 code there and validated
+against at least 2 implementations of step 1 (and internal system and now
+the public [Kured](https://github.com/weaveworks/kured) project) gives us
+confidence that Kamino is a viable first release operational and useful tool.
