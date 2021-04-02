@@ -78,7 +78,7 @@ jobs:
           SUBSCRIPTION_ID: ${{ secrets.TEST_AZURE_SUB_ID }}
           CLIENT_ID: ${{ secrets.TEST_AZURE_SP_ID }}
           CLIENT_SECRET: ${{ secrets.TEST_AZURE_SP_PW }}
-          LOCATION: "westus2"
+          LOCATION: "eastus2"
           TENANT_ID: ${{ secrets.TEST_AZURE_TENANT_ID }}
           SKIP_LOGS_COLLECTION: true
           CLEANUP_ON_EXIT: true
