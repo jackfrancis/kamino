@@ -401,6 +401,7 @@ def image_tweaks(node_name):
         # Give kubernetes a few moments to notice we are running
         # as the rest of this stuff really just happens quickly
         '/bin/sleep 4',
+        # Update an ancestry.log
         '/bin/echo "$(/bin/date) VMSS-Prototype Donor: $(/bin/hostname)" >> /var/log/ancestry.log',
         # Multiple lines so it is easier to read all of the different
         # items we are cleaning up (removing)
@@ -420,7 +421,6 @@ def image_tweaks(node_name):
             ' /var/lib/waagent/GoalState.*.xml'
             ' /var/lib/waagent/*.manifest.xml'
             '',
-        # Update an ancestry.log
         # This forces the machine-id to be re-issued
         '/bin/cp /dev/null /etc/machine-id',
         # Finally, we need to power off now
