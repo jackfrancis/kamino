@@ -8,9 +8,9 @@ kamino:
     # TODO:  Point these to our public container registry once we have it setup
     imageRegistry: ghcr.io
     imageRepository: jackfrancis/kamino/vmss-prototype
-    imageTag: v0.0.11
+    imageTag: v0.0.12
     # Pulling by hash has stronger assurance that the container is unchanged
-    imageHash: "e26ef9f67e07f666b6877196084f3ca95547835d83ba4d1e4d0892dc20c14faa"
+    imageHash: "418cabda69afed714b33f5ee150c9683443725e9a8f7fb7d953f8372e34ad208"
     pullByHash: true
 
     # include the name of the image pull secret in your cluster if you
