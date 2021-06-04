@@ -1,82 +1,54 @@
 # Status
 
-This is a living document to help folks understand where kamino is at in its pre-alpha, baby walker stage.
+This is a living document to help folks understand the status of the kamino project.
+## Release Status
 
-## Managing Node Health and Scaling
+A complete, automated solution for optimizing node OS updates over time is
+tested as working, and will form the basis of an upcoming v1.0.0 release.
 
-There are what I like to call 3 key operations that are needed in a cluster. As of right now we're focus on generalizing one of those operations as functionality for Kubernetes + Azure.
+The ETA of a v1.0.0 release is June 2021.
 
-### Patching/Updating Nodes
-The core need is to apply patches/security fixes/etc to the host nodes in the
-cluster as they are approved/released for use.  This is important as otherwise
-the host nodes may be left vulnerable to known flaws (either security or just
-reliability/performance).
+## Functional Status
 
-This process is one that is needed for long running clusters.
+The following functionality is tested and stable on Kubernetes + Azure:
 
-### Scaling Nodes and Patch Application
+- Update the "node recipe" (in Azure we refer to this as the "VMSS Prototype")
+to an OS image snapshot of the most recently rebooted (a proxy for recently
+patched), working node VM.
+  - The tested component to enforce node reboots is [kured](https://github.com/weaveworks/kured).
+  You must use version 1.7.0 or later, which supports node annotations, used
+  by kamino's `vmss-prototype` to determine when nodes were last rebooted.
+- Update the Azure VMSS definition to remove cloud-init and script extensions,
+as we assume those were attached to the VMSS in order to perform an initial
+bootstrap of the Kubernetes node (download required components, configure
+for Kubernetes, etc), and are no longer required to execute.
+- Run all of the above on as a Kubernetes CronJob, with the ability to update
+the VMSS image reference as frequently as once per day to optimize highly
+dynamic clusters.
 
-In clusters that scale in new nodes at any regular basis, the nodes start out
-in the same state that the original image defined for the VMSS was built with.
-This means that new nodes need to apply the applicable security patches and
-updates that were released since that image was created.  This results in
-two things when scaling dynamically:
+## Kubernetes + Azure support
 
-1) Nodes are doing a lot of work to patch themselves (including needed reboots)
-2) Nodes are temporarily vulnerable to any security issues
+The kamino scenarios are regularly tested against Kubernetes + Azure clusters
+using VMSS nodes, built with AKS Engine. Custom-built Kubernetes + Azure
+solutions may work as well, so long as the following is true:
 
-This is costly in a number of ways.  What the prototype pattern does is enable
-those node-level transformations to be saved and already installed on newly
-scaled in nodes.
+- The clusters are using VMSS to build nodes pools of "functionally identical"
+sets of nodes
+- VMSS is not configured to "auto rollout" VMSS model updates — this would
+result in an unnecessary, non-graceful update of _all_ nodes in that VMSS every
+time that kamino's `vmss-prototype` updated the OS image. `vmss-prototype` is
+not designed to solve the problem of "make all my nodes exactly the same", but
+rather it solves the problem "make the _next node_ I build like my most
+recently patched, stable node".
 
-There are some additional benefits but, for example, in our many of cluster,
-we often see a dynamic range of hundreds of nodes between the lowest use and
-highest use within a given day.  This means that hundreds of nodes would be
-scaling in and applying patches every day - putting a large burden on the
-patch servers and the network plus adding overhead/reducing useful work those
-nodes can do along with the various error paths that could happen.
+## FAQ
 
-## The Full Solution
+### Does kamino support cluster-api + Azure (capz)
 
-The full solution we had developed consists of basically 3 components:
+At this time, kamino does not have working solutions for capz. There are a
+few considerations before we can start experimenting with capz:
 
-1) Update/patch the nodes of the clusters (includes graceful rebooting)
-2) Determine a new prototype is needed and select the healthy/updated node to become the prototype
-3) Using the selected node, generate a new base image for the node pool
-
-### First release is step 3?
-
-The key bit of code we are first producing here is step 3.  Why?
-
-The reason is that step 1 may have already been implemented by people today.
-We have our own in the Skyman platform but in any case, the biggest value
-is not solving this problem right now.  It will come when we talk about
-the full solution.
-
-Step 2 is very much dependent on step 1 - there are bits of data or annotations
-that are needed to automatically reason about which node is most suited to
-becoming the prototype pattern node.  We have, a mechanism that is a
-reasonable base implementation of Step 2 in the code based on the rules
-with attributes as we have stated them.
-
-Step 3 is the part that no one (or no one we know of) has.  This part can
-be used, in the worst case, by someone manually selecting the target node.
-However, without step 3, the scaling in of new nodes is costly and potentially
-a security risk.  Thus, our first release is step 3.
-
-### Will we do more?
-
-Yes - our goal is to bring steps 1 and 2 as pluggable elements such that
-each of them could be replaced with their own implementations.  Our goal
-is to have a basic reference implementation of all 3 components.
-
-With the latest changes to the open source [Kured](https://github.com/weaveworks/kured)
-tool, we now have a baseline of step 1 plus our [Kamino auto update](../helm/vmss-prototype/auto-update.md) for
-step 2 and 3.
-
-Our hope is that these components are composable and replaceable as needed.
-Again, the big push was doing step 3 first in that we felt that was the
-most critical and unique component.  Having our step 2 code there and validated
-against at least 2 implementations of step 1 (and internal system and now
-the public [Kured](https://github.com/weaveworks/kured) project) gives us
-confidence that Kamino is a viable first release operational and useful tool.
+- Integrate with cluster-api's support for "VM Sets" (`MachinePool`); or
+- Integrate with cluster-api's base VM support (`Machine`)
+- Address the kubeadm surface area, which bootstraps nodes differently than
+the Azure + Kubernetes scenarios described above.

@@ -680,7 +680,7 @@ def mktime_from_kubernetes(kube_time_string):
 def format_into_version(date_time):
     """
     Convert a datetime into a version string
-    Note that the format of the string is yyyy.mm.dd
+    Note that the format of the string is YYYY.MM.DD
     and is required to be in that kind of format for
     the SIG to work correctly (defined by Azure)
     It does not need to be year.month.day but it must
@@ -1000,7 +1000,8 @@ def vmss_prototype_update(sub_args):
                 'virtualMachineProfile.storageProfile.imageReference.offer=null',
                 'virtualMachineProfile.storageProfile.imageReference.publisher=null',
                 'virtualMachineProfile.storageProfile.imageReference.version=null',
-                # This puts a no-op customData as the node is already "set" '#cloud-config\n' encoded into base64
+                # This configures a no-op cloud-init ('#cloud-config\n' encoded into base64) into the Azure 'customData' property
+                # because initial node bootstrapping via cloud-init has completed
                 'virtualMachineProfile.osProfile.customData=I2Nsb3VkLWNvbmZpZwo=',
             ], retries=3, check=False)
 
@@ -1026,7 +1027,7 @@ def vmss_prototype_update(sub_args):
     for extension in extensions:
         # Now that we have a disk image that already has all of our
         # provisioning bits on it (prototype) we can remove all extensions
-        # But...  We want to keep the billing one for telemetry reasons
+        # But...  We want to keep the AKS Engine-identifying extension for telemetry reasons
         # It is a no-op code wise but gives counts
         if 'vmss-computeAksLinuxBilling' not in extension['name']:
             run(az(['vmss', 'extension', 'delete'], subscription) + [
