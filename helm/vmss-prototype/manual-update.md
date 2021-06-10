@@ -1,10 +1,9 @@
 # Manual Update
 
-This is a low level description of the basic functions of the VMSS-Prototype Pattern (Kamino) system.  This goes into deep details as to what you are doing on the machine.
-
+The simplest way to use `vmss-protoype` is to perform an ad hoc, one-time update of the VMSS OS image by choosing a single node (it must be a node built with VMSS) running on your cluster to take an OS image snapshot from.
 ## Example
 
-Below is the canonical way to run vmss-prototype on your cluster using our published Helm Chart:
+Below is the canonical way to run vmss-prototype on your cluster using our published Helm Chart. To manually choose the node to use, and to do a one-time `vmss-prototype` operation, use the `targetNode` helm value:
 
 ```bash
 $ helm install --repo https://jackfrancis.github.io/kamino/ \

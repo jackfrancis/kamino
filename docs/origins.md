@@ -2,7 +2,7 @@
 
 The set of tooling in the kamino project began as a small but significant feature of an internal Microsoft platform called Skyman, built to support various highly available, highly dynamic Cognitive Services operations inside Azure and Microsoft.  Skyman is built on top of Kubernetes and Azure and runs many large production, real-time AI workloads.
 
-The following documents some of the conceptual and practical thinking from that Skyman feature work. It is useful because it describes the design foundations that the kamino project will inherit.
+The following documents some of the conceptual and practical thinking from that Skyman feature work. It is useful because it describes the design foundations that the kamino project inherits.
 
 # Kubernetes node "Prototype Pattern"
 
@@ -18,6 +18,8 @@ Conceptually, we borrow from both the [Prototype Pattern](https://en.wikipedia.o
 
 The following comments on VMSS are specific to Azure. It's appropriate to go into some of that detail in order to describe the actual history; we leave it as an exercise for the reader to generalize the "VMSS" solution to "any VM factory that builds VMs from a common recipe".
 
+VMSS is an Azure "virtual machine factory" service that stands for "Virtual Machine Scale Sets". In this terminology, "VMSS" means the set of configurations that every VM will use; it's a recipe to build "identically configured" VMs. Additionally, "instance" means a single VM built from a given VMSS. Finally, we will sometimes use the term "VMSS model": this means a particular, versioned VMSS configuration. As you change the "VMSS model" over time, you then change the way that resulting instances (again, an instance means a VM built from a VMSS) are built/rendered by VMSS.
+
 The normal VMSS pattern is to use some *generic base image* for VMSS and apply the cloud-init and shell script extensions (by this we mean any configurable, concrete executable code tightly coupled to the VM bootstrap process) to each instance as they are created and join the cluster as a Kubernetes node. Basically, performing one-time, application domain-specific bootstrapping during each VM instance scale out operation.
 
 This introduces problems in that those node bootstrap operations are a constant that we do inside the node scaling "loop" for each node we create.  Some of those operations involve network operations, for example to download pre-requisite code and/or configuration, all of which is paid for _on each node instance_ as it is scaled in.  Those operations are environment-specific (i.e., specific to the entire Virtual Machine Scale Set resource definition), but they are not instance-specific.
@@ -30,7 +32,7 @@ Our usage of the [Prototype Pattern](https://en.wikipedia.org/wiki/Prototype_pat
 
 This is a conceptually simple model - take a good node and basically say, when we scale, make more just like that one.  One could call them "clones" of the known good instance.
 
-This provides not only a way to hoist all of the per-node "fixed" operations outside of the scaling loop, but compared to building an image in a staging environment, and testing nodes in a staging cluster we now have a definitive process by which to build nodes that we know actually work.  The image has, by definition, been tested in the cluster, has been running useful workloads, and has been fully patched with the latest OS updates.
+This provides not only a way to hoist all of the per-node "fixed" operations outside of the scaling loop, but compared to building an image and testing it in a staging environment, we now have a more definitive process by which to build nodes that we know actually work.  The image has, by definition, been tested in the cluster, has been running useful workloads, and has been fully patched with the latest OS updates.
 
 ### Conceptually Simple
 
@@ -129,4 +131,4 @@ This cost is per VMSS that we are supporting in the cluster and is rather minima
 ### Kubernetes Machine ID
 There is an identifier that (as far as we can tell) is not used but is normally unique across machines.  This is the "Machine ID" for a node.  This is separate from the "System UUID" which is also unique per node.
 
-We are still unsure as to if it matters that the Machine ID is not unique when VMSS Prototype Pattern based VMs are booted.  We have an [open issue](https://github.com/jackfrancis/kamino/issues/22) to look into this some more in the future.  We have a conceptually simple fix but it is not trivial to implement and we don't yet have any indication that it would fix or improve anything.
+We remove the machine ID during the OS image capture process so that the VMSS model update does produce future VMs with identifying information that reflects "another" VM (the VM we took the OS image snapshot from).
