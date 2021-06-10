@@ -21,6 +21,12 @@ kamino:
   # Minimum is 2.
   imageHistory: 3
 
+  # Number of seconds after the job completes before it is cleaned up
+  # see https://kubernetes.io/docs/concepts/workloads/controllers/job/#ttl-mechanism-for-finished-jobs
+  # This has it clean up the pod from the cluster within an hour, just to
+  # help reduce left over state in the cluster.
+  jobTtl: 3600
+
   drain:
     # Drain grace period is the maximum time to allow pods to drain load
     # and leave the node.  The default of 300 seconds is relatively long

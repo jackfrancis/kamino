@@ -48,6 +48,7 @@ spec:
 {{- end }}
 
 # This is indented like it is under either the Job.spec or CronJob.spec.jobTemplate.spec
+      ttlSecondsAfterFinished: {{ .Values.kamino.jobTtl }}
       template:
         metadata:
           labels:
