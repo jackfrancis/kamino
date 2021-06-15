@@ -64,8 +64,8 @@ The `vmss-prototype` operation carries out a procedural set of steps, each of wh
 6. Similarly verify that we have not yet created an OS snapshot from the target VMSS instance in the last 24 hours. If we _do have an image with the current day's version_, then we don't fail the operation, but instead assume that we are in a retry context, and skip to step 14 below to build the SIG Image Definition version from the snapshot with today's date. If there is not an image with today's timestamp then we go to the next step:
 7. Add a node annotation of `"cluster-autoscaler.kubernetes.io/scale-down-disabled=true"` to the target node, so that if cluster-autoscaler is running in our cluster we prevent it from _deleting that node_ (that's what happens when you scale down), and thus deleting the VMSS instance, while we are taking an OS image snapshot of the instance.
 8. Cordon + drain the target node in preparation for taking it offline. If the cordon + drain fails, we will fail the operation _unless we pass in the `--force` option to the `vmss-prototype` tool (see the Helm Chart usage of `kamino.drain.force` below)_.
-9. Deallocate the VMSS instance. This is a fancy, Azure-specific way of saying that we release the reservation of the underlying compute hardware running that instance virtual machine. This is a pre-condition to performing a snapshot of the underlying disk.
-10. Make a snapshot of the OS disk image attached to the deallocated VMSS instance.
+9. Stop the VMSS instance. This is an Azure-specific way of stopping that instance. This is a pre-condition to performing a snapshot of the underlying disk.
+10. Make a snapshot of the OS disk image attached to the stopped VMSS instance.
 11. Restart the node's VMSS instance that we just grabbed a snapshot of.
 12. Uncordon the node to allow Kubernetes to schedule workloads onto it.
 13. Remove the `cluster-autoscaler.kubernetes.io/scale-down-disabled` cluster-autoscaler node annotation as we no longer care if this node is chosen for removal by cluster-autoscaler.

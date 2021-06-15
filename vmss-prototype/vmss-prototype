@@ -416,10 +416,6 @@ def image_tweaks(node_name):
             ' /var/lib/cloud/instances/*'
             ' /var/lib/waagent/history/*'
             ' /var/lib/waagent/events/*'
-            # or have goals that are no longer valid
-            ' /var/lib/waagent/ExtensionsConfig.*.xml'
-            ' /var/lib/waagent/GoalState.*.xml'
-            ' /var/lib/waagent/*.manifest.xml'
             '',
         # This forces the machine-id to be re-issued
         '/bin/cp /dev/null /etc/machine-id',
@@ -883,14 +879,13 @@ def vmss_prototype_update(sub_args):
                 # nodes.
                 image_tweaks(target_node)
 
-                # Stop the VM now (deallocate it such that the disk image can be accessed)
-                run(az(['vmss', 'deallocate'], subscription) + [
+                # Stop the VM now (stop it such that the disk image can be accessed safely)
+                run(az(['vmss', 'stop'], subscription) + [
                     '--resource-group', resource_group,
                     '--name', vmss,
                     '--instance-ids', instance_id
                     ], retries=3, log_timing=True, retry_func=not_found_no_retry)
 
-                # Snapshot the disk
                 output, _, _ = run(az(['snapshot', 'create'], subscription) + [
                                    '--resource-group', resource_group,
                                    '--name', snapshot_name,
@@ -901,8 +896,9 @@ def vmss_prototype_update(sub_args):
                                    ], retries=6)
                 snapshot = json.loads(output)
 
+                # Restart the instance and let it continue operation
                 # NOTE:  In certain versions of aks-engine, restarting a VM after
-                # it was deallocated will cause cloud-init to write an empty
+                # it was stopped will cause cloud-init to write an empty
                 # azure.json file but the aks-engine CSE will not write the
                 # correct one as it thinks the node is all ready to run.
                 # For those cases, this start will leave the node un-responsive
@@ -915,7 +911,7 @@ def vmss_prototype_update(sub_args):
                 # this only impacts certain aks-engine versions and only for the
                 # nodes that had not yet transitioned to a vmss-prototype
                 # All aks-engine versions 0.57.0 or later have this fixed.
-                stdout, stderr, exit_code = run(az(['vmss', 'start'], subscription) + [
+                run(az(['vmss', 'start'], subscription) + [
                     '--resource-group', resource_group,
                     '--name', vmss,
                     '--instance-ids', instance_id,
@@ -929,7 +925,7 @@ def vmss_prototype_update(sub_args):
                     target_node
                     ], retries=3, check=False, retry_func=not_found_no_retry)
 
-                # Allow the cluster from scaling away the node if it wishes
+                # Allow the cluster to scale away the node if it wishes
                 run(['kubectl', 'annotate', 'node',
                     target_node,
                     'cluster-autoscaler.kubernetes.io/scale-down-disabled-'
