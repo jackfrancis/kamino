@@ -263,7 +263,7 @@ TEST SUITE: None
 
 Note in the above `helm install` invocation, we include the `--set kamino.newUpdatedNodes=10` option. We do this to easily demonstrate the effects of building new nodes in the VMSS node pool from the target node.
 
-Before long, we'll see that node once again go out of service due to `vmss-prototype` needing to deallocate and take a snapshot image of its OS disk:
+Before long, we'll see that node once again go out of service due to `vmss-prototype` needing to stop and take a snapshot image of its OS disk:
 
 ```sh
 $ k get nodes -o wide -w
@@ -312,8 +312,8 @@ INFO: ===> Executing command: ['kubectl' 'annotate' 'node' 'k8s-agentpool1-26100
 INFO: ===> Executing command: ['kubectl' 'cordon' 'k8s-agentpool1-26100436-vmss000000']
 INFO: ===> Executing command: ['kubectl' 'drain' '--ignore-daemonsets' '--delete-local-data' '--force' '--grace-period' '300' '--timeout' '900s' 'k8s-agentpool1-26100436-vmss000000']
 INFO: ===> Completed in 0.18s: ['kubectl' 'drain' '--ignore-daemonsets' '--delete-local-data' '--force' '--grace-period' '300' '--timeout' '900s' 'k8s-agentpool1-26100436-vmss000000'] # RC=0
-INFO: ===> Executing command: ['az' 'vmss' 'deallocate' '--subscription' 'aa3d3369-e814-4495-899d-d31e8d7d09ce' '--resource-group' 'kubernetes-westus2-17813' '--name' 'k8s-agentpool1-26100436-vmss' '--instance-ids' '0']
-INFO: ===> Completed in 152.41s: ['az' 'vmss' 'deallocate' '--subscription' 'aa3d3369-e814-4495-899d-d31e8d7d09ce' '--resource-group' 'kubernetes-westus2-17813' '--name' 'k8s-agentpool1-26100436-vmss' '--instance-ids' '0'] # RC=0
+INFO: ===> Executing command: ['az' 'vmss' 'stop' '--subscription' 'aa3d3369-e814-4495-899d-d31e8d7d09ce' '--resource-group' 'kubernetes-westus2-17813' '--name' 'k8s-agentpool1-26100436-vmss' '--instance-ids' '0']
+INFO: ===> Completed in 152.41s: ['az' 'vmss' 'stop' '--subscription' 'aa3d3369-e814-4495-899d-d31e8d7d09ce' '--resource-group' 'kubernetes-westus2-17813' '--name' 'k8s-agentpool1-26100436-vmss' '--instance-ids' '0'] # RC=0
 INFO: ===> Executing command: ['az' 'snapshot' 'create' '--subscription' 'aa3d3369-e814-4495-899d-d31e8d7d09ce' '--resource-group' 'kubernetes-westus2-17813' '--name' 'snapshot_k8s-agentpool1-26100436-vmss' '--source' '/subscriptions/aa3d3369-e814-4495-899d-d31e8d7d09ce/resourceGroups/kubernetes-westus2-17813/providers/Microsoft.Compute/disks/k8s-agentpool1-26100k8s-agentpool1-261004OS__1_895f47c2b4bb474a8eb24b32452b94b2' '--tags' 'BuiltFrom=k8s-agentpool1-26100436-vmss000000' 'BuiltAt=2021-01-08 21:09:34.255642']
 INFO: ===> Executing command: ['az' 'vmss' 'delete-instances' '--subscription' 'aa3d3369-e814-4495-899d-d31e8d7d09ce' '--resource-group' 'kubernetes-westus2-17813' '--name' 'k8s-agentpool1-26100436-vmss' '--instance-ids' '0' '--no-wait']
 INFO: ===> Executing command: ['kubectl' 'uncordon' 'k8s-agentpool1-26100436-vmss000000']
