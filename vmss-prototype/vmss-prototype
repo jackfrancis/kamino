@@ -1055,13 +1055,14 @@ def vmss_prototype_update(sub_args):
             logging.warning('Unable to determine capacity for VMSS {0}, will not add back 1 instance'.format(vmss))
 
 
-def get_candidate_nodes(vmss, nodes, node_ignore_names, node_ignore_annotations, minimum_ready_time, pending_reboot_annotation, last_patch_annotation, latest_image):
+def get_candidate_nodes(vmss, nodes, self_node, node_ignore_names, node_ignore_annotations, minimum_ready_time, pending_reboot_annotation, last_patch_annotation, latest_image):
     """
     Returns an ordered list of candidates, with the longest healthy first.
     Candidates are nodes names for the "prototype" node.
     This may be an empty list which would mean that there are no valid candidates.
     :param vmss:  The name of the VMSS we are operating on
     :param nodes:  The Nodes items from kubernetes
+    :param self_node:  The node we are running on so we skip it as a possible candidate
     :param node_ignore_names:  The list of node names to ignore
     :param node_ignore_annotations:  The list of node annotations that, if existing, will cause the node to be ignored
     :param minimum_ready_time:  Minimum ready time before a node is considered
@@ -1079,7 +1080,7 @@ def get_candidate_nodes(vmss, nodes, node_ignore_names, node_ignore_annotations,
             logging.debug('IGNORED: Node {0} not part of vmss {1}'.format(node_name, vmss))
             continue
 
-        if node_name == os.getenv('NODE_ID', None):
+        if node_name == self_node:
             logging.debug('IGNORED: Node {0} is the same as the node we are running on'.format(node_name))
             continue
 
@@ -1177,6 +1178,9 @@ def vmss_prototype_auto_update(sub_args):
     # The list of threads we started
     started_threads = []
 
+    # Get the node we are running on so we don't select it as our target
+    self_node = os.getenv('NODE_ID', None)
+
     for vmss in vmss_names:
         # The VMSS specific image definition name
         image_definition = get_sig_image_def(vmss)
@@ -1193,6 +1197,7 @@ def vmss_prototype_auto_update(sub_args):
         # Get a list of candidate nodes with newer OS patches than the current
         # image version
         potential_nodes = get_candidate_nodes(vmss, nodes,
+                                              self_node,
                                               node_ignore_names,
                                               node_ignore_annotations,
                                               sub_args.minimum_ready_time,
@@ -1207,6 +1212,7 @@ def vmss_prototype_auto_update(sub_args):
                 # lets try again without looking for OS patches.
                 logging.info('Image maximum age reached - looking for any suitible node')
                 potential_nodes = get_candidate_nodes(vmss, nodes,
+                                                      self_node,
                                                       node_ignore_names,
                                                       node_ignore_annotations,
                                                       sub_args.minimum_ready_time,
@@ -1282,6 +1288,8 @@ def in_cluster(sub_args, func):
         tenant = data['tenantId']
         subscription = data['subscriptionId']
         resource_group = data['resourceGroup']
+        # Optional MSI identity ID
+        identity = data.get('userAssignedIdentityID', None)
 
         # We have to set our default cloud (the public cloud is the default-default)
         cloud = data['cloud']
@@ -1335,15 +1343,21 @@ def in_cluster(sub_args, func):
              '--name', cloud
              ])
 
-        login_cmd = ['az', 'login',
-                     '--username', username,
-                     '--password', password,
-                     '--tenant', tenant,
-                     '--service-principal'
-                     ]
+        masq = None
+        # MSI login has the username as "msi"
         if username == "msi":
             login_cmd = ['az', 'login', '--identity']
-        masq = [username, password, tenant]
+            if identity:
+                login_cmd += ['--username', identity]
+                masq = [ identity ]
+        else:
+            login_cmd = ['az', 'login',
+                         '--username', username,
+                         '--password', password,
+                         '--tenant', tenant,
+                         '--service-principal'
+                         ]
+            masq = [username, password, tenant]
 
         # We have seen temporary network failures cause this to fail so we will
         # add a simple retry loop here, with slowly increasing delay between
