@@ -219,5 +219,5 @@ spec:
             {{- if .Values.kamino.scheduleOnControlPlane }}
             kubernetes.io/role: master
             {{- end }}
-            beta.kubernetes.io/os: linux
+            kubernetes.io/os: linux
 {{- end }}
