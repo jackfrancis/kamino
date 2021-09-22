@@ -1014,32 +1014,41 @@ def vmss_prototype_update(sub_args):
             fatal_error('VMSS {0} failed to be configured to use prototype iamge'.format(vmss))
 
     # Get the VMSS extensions and see if we can clean them up
-    output, _, _ = run(az(['vmss', 'extension', 'list'], subscription) + [
-                       '--resource-group', resource_group,
-                       '--vmss-name', vmss
-                       ], retries=3)
-    extensions = json.loads(output)
+    # Note that we could potentially loop here since we have seen a delete
+    # report success but not actually delete the extension.  So we can try
+    # this loop up to 5 times (just in case)
+    delete_tries = 5
+    delete_extensions = True
+    while delete_extensions and delete_tries > 0:
+        delete_tries = delete_tries - 1
+        delete_extensions = False
+        output, _, _ = run(az(['vmss', 'extension', 'list'], subscription) + [
+                           '--resource-group', resource_group,
+                           '--vmss-name', vmss
+                           ], retries=3)
+        extensions = json.loads(output)
 
-    for extension in extensions:
-        # Now that we have a disk image that already has all of our
-        # provisioning bits on it (prototype) we can remove all extensions
-        # But...  We want to keep the AKS Engine-identifying extension for telemetry reasons
-        # It is a no-op code wise but gives counts
-        if 'vmss-computeAksLinuxBilling' not in extension['name']:
-            run(az(['vmss', 'extension', 'delete'], subscription) + [
-                '--resource-group', resource_group,
-                '--vmss-name', vmss,
-                '--name', extension['name']
-                ], retries=3, check=False, retry_func=not_found_no_retry)
+        for extension in extensions:
+            # Now that we have a disk image that already has all of our
+            # provisioning bits on it (prototype) we can remove all extensions
+            # But...  We want to keep the AKS Engine-identifying extension for telemetry reasons
+            # It is a no-op code wise but gives counts
+            if 'vmss-computeAksLinuxBilling' not in extension['name']:
+                delete_extensions = True
+                run(az(['vmss', 'extension', 'delete'], subscription) + [
+                    '--resource-group', resource_group,
+                    '--vmss-name', vmss,
+                    '--name', extension['name']
+                    ], retries=3, check=False, retry_func=not_found_no_retry, log_retry_errors=True)
 
     if sub_args.new_updated_nodes > 0:
         # Scale out 1 more VMSS instance to replace the previously deleted instance
         # Note: this does not respect any changes that may have occured to the VMSS instance count during update
         # from out-of-band node scaling tools such as cluster-autoscaler
         output, _, _ = run(az(['vmss', 'show'], subscription) + [
-                        '--resource-group', resource_group,
-                        '--name', vmss
-                        ], retries=3)
+                           '--resource-group', resource_group,
+                           '--name', vmss
+                           ], retries=3)
         vmss_info = json.loads(output)
         capacity = lookup_one_value(vmss_info, 'sku.capacity')
         if capacity != None:
