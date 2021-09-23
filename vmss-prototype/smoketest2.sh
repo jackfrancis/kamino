@@ -45,6 +45,7 @@ ${HELM3} upgrade --install ${DEPLOYMENT_NAME} ../helm/vmss-prototype \
     --set kamino.container.imageTag=${MY_TAG} \
     --set kamino.container.pullByHash=false \
     --set kamino.container.pullSecret=skyman-acr \
+    --set kamino.scheduleOnControlPlane=true \
     --set kamino.drain.gracePeriod=5 \
     --set kamino.drain.force=true \
     #--set kamino.targetNode=k8s-agentpool1-18861755-vmss000007

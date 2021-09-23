@@ -1016,12 +1016,20 @@ def vmss_prototype_update(sub_args):
     # Get the VMSS extensions and see if we can clean them up
     # Note that we could potentially loop here since we have seen a delete
     # report success but not actually delete the extension.  So we can try
-    # this loop up to 5 times (just in case)
-    delete_tries = 5
+    # this loop up to 5 times (just in case).  It always loops once to check
+    # that the delete actually took place (re-listing the extensions)
+    delete_tries = 0
     delete_extensions = True
-    while delete_extensions and delete_tries > 0:
-        delete_tries = delete_tries - 1
+    while delete_extensions and delete_tries < 5:
         delete_extensions = False
+
+        # If this is our 3rd or higher time through, we want to sleep a bit
+        # to allow whatever failure to delete that was happening to clear up
+        if delete_tries > 1:
+            logging.info('Already did {0} attempts at deleting extensions - delaying a bit before next attempt'.format(delete_tries))
+            # This is a linear backoff - we should never get here but
+            time.sleep(delete_tries * 30)
+
         output, _, _ = run(az(['vmss', 'extension', 'list'], subscription) + [
                            '--resource-group', resource_group,
                            '--vmss-name', vmss
@@ -1041,8 +1049,10 @@ def vmss_prototype_update(sub_args):
                     '--name', extension['name']
                     ], retries=3, check=False, retry_func=not_found_no_retry, log_retry_errors=True)
 
+        delete_tries = delete_tries + 1
+
     if sub_args.new_updated_nodes > 0:
-        # Scale out 1 more VMSS instance to replace the previously deleted instance
+        # Scale out more VMSS instances if asked, using the new prototype image
         # Note: this does not respect any changes that may have occured to the VMSS instance count during update
         # from out-of-band node scaling tools such as cluster-autoscaler
         output, _, _ = run(az(['vmss', 'show'], subscription) + [
@@ -1051,14 +1061,14 @@ def vmss_prototype_update(sub_args):
                            ], retries=3)
         vmss_info = json.loads(output)
         capacity = lookup_one_value(vmss_info, 'sku.capacity')
-        if capacity != None:
+        if capacity is not None:
             # Increase the capacity of the VMSS by the value of --new-updated-nodes
             run(az(['vmss', 'update'], subscription) + [
                 '--resource-group', resource_group,
                 '--name', vmss,
                 '--set',
                     'sku.capacity={0}'.format(capacity + sub_args.new_updated_nodes),
-                "--no-wait"
+                '--no-wait'
                 ], retries=3, check=False)
         else:
             logging.warning('Unable to determine capacity for VMSS {0}, will not add back 1 instance'.format(vmss))
