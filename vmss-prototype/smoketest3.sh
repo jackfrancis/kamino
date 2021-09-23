@@ -36,6 +36,7 @@ ${HELM3} upgrade --install ${DEPLOYMENT_NAME} ../helm/vmss-prototype \
     --set kamino.auto.lastPatchAnnotation=LatestOSPatch \
     --set kamino.auto.pendingRebootAnnotation=PendingReboot \
     --set kamino.auto.maximumImageAge=15 \
+    --set kamino.scheduleOnControlPlane=true \
     --set kamino.auto.dryRun=true
 
 # Show the commands we are about to run
