@@ -886,10 +886,15 @@ def vmss_prototype_update(sub_args):
                     '--instance-ids', instance_id
                     ], retries=3, log_timing=True, retry_func=not_found_no_retry)
 
+                # NOTE: --copy-start false option is a workaround for
+                # bug in Azure CLI in 2.30.0 but is safe to use as it
+                # does create a snapshot just like we wanted anyway
+                # See https://github.com/Azure/azure-cli/issues/20313
                 output, _, _ = run(az(['snapshot', 'create'], subscription) + [
                                    '--resource-group', resource_group,
                                    '--name', snapshot_name,
                                    '--source', vmss_disk,
+                                   '--copy-start', 'false', # work around azure CLI 2.30.0
                                    '--tags',
                                        'BuiltFrom={0}'.format(target_node),
                                        'BuiltAt={0}'.format(datetime.datetime.now().strftime(snapshot_time_format))
