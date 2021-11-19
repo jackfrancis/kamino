@@ -862,7 +862,8 @@ def vmss_prototype_update(sub_args):
                     # drained (they should have drained already but just in case)
                     pods, _, _ = run(['kubectl', 'get', 'pods',
                                       '--all-namespaces',
-                                      '--output', 'jsonpath={{range .items[?(@.spec.nodeName=="{0}")]}}{{.metadata.ownerReferences[0].kind}}{{" "}}{{.metadata.namespace}}{{" "}}{{.metadata.name}}{{"\\n"}}{{end}}'.format(target_node)
+                                      '--field-selector', 'spec.nodeName={0}'.format(target_node),
+                                      '--output', 'jsonpath={range .items[*]}{.metadata.ownerReferences[0].kind}{" "}{.metadata.namespace}{" "}{.metadata.name}{"\\n"}{end}'
                                       ], retries=3)
 
                     for line in pods.splitlines():
