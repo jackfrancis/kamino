@@ -92,7 +92,7 @@ def log_stdout_stderr(stdout, stderr, exit_code, masq=None):
 
 def run(command, timeout=None, env=None, shell=False, check=True, quiet=False, dry_run=False, show_cmd=True, cwd=None,
         echo=False, masq=None, stdin='', comment=None, log_timing=False, log_stdout_on_error=True, log_stderr_on_error=True,
-        retries=1, retry_wait_duration_func=lambda num_retry: 2 ** (num_retry + 2), log_final_error=False, log_retry_errors=False,
+        retries=1, retry_wait_duration_func=lambda num_retry: 2 ** (num_retry + 2), log_final_error=True, log_retry_errors=False,
         retry_func=lambda stdout, stderr, exit_code: True):
     """
     Run the given command in the shell
@@ -116,7 +116,7 @@ def run(command, timeout=None, env=None, shell=False, check=True, quiet=False, d
     :param log_stderr_on_error: If true (default), on error, the stderr of the command is logged
     :param retries: Number of retries before giving up due to errors
     :param retry_wait_duration_func: A function to get the wait in seconds for a particular retry attempt. Default delay is exponential backoff with initial delay of 8 seconds
-    :param log_final_error: Log the final retry error even if check==False
+    :param log_final_error: Log the final retry error even if check==False - defaults to True
     :param log_retry_errors: Log the errors for retries
     :param retry_func: Function to call after an error.   Passed in 3-tuple (stdin, stdout, exit_code), return is if retry should happen (False if no retry)
     :return: 3-tuple (stdout as string, stderr as string and exit code as int)
@@ -1085,7 +1085,7 @@ def vmss_prototype_update(sub_args):
             # provisioning bits on it (prototype) we can remove all extensions
             # But...  We want to keep the AKS Engine-identifying extension for telemetry reasons
             # It is a no-op code wise but gives counts
-            if 'vmss-computeAksLinuxBilling' not in extension['name']:
+            if 'AKSLinuxBilling' not in extension['name']:
                 delete_extensions = True
                 run(az(['vmss', 'extension', 'delete'], subscription) + [
                     '--resource-group', resource_group,

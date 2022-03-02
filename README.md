@@ -6,7 +6,7 @@ Put simply: "identical", "peer" nodes that exist _in duplicate_ for the purpose 
 
 # Status of Project
 
-The kamino set of tools are currently approaching a v1.0 stable release, tested against Kubernetes running on Azure with VMSS-backed node pools, on clusters built with the [AKS Engine](https://github.com/Azure/aks-engine) tool.
+The kamino set of tools are currently approaching a v1.0 stable release, tested against Kubernetes running on Azure with VMSS-backed node pools, on clusters built with the [AKS Engine](https://github.com/Azure/aks-engine) tool. You may also run it as a proof of concept on your AKS cluster, see [here](docs/AKS.md) for more information.
 
 More status [here][status].
 

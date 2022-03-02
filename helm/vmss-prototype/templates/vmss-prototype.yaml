@@ -1,6 +1,5 @@
 {{- if hasKey .Values "kamino" -}}
 
-# Pick our job name here
 {{- $jobName := printf "%s-%s" .Values.kamino.name "status" -}}
 {{- if hasKey .Values.kamino "targetVMSS" -}}
 {{- $jobName = printf "%s-%s" .Values.kamino.name "autoupdate" -}}
@@ -9,7 +8,46 @@
 {{- $jobName = printf "%s-%s" .Values.kamino.name (substr 0 (int (sub (len .Values.kamino.targetNode) 6)) .Values.kamino.targetNode) -}}
 {{- end -}}
 {{- end -}}
+{{- $rbacResourceName := printf "kamino-%s" $jobName -}}
 
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $rbacResourceName }}
+  namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $rbacResourceName }}
+rules:
+- apiGroups: [""]
+  resources: ["pods/eviction"]
+  verbs: ["create"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "delete", "create"]
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["get", "patch"]
+- apiGroups: ["apps"]
+  resources: ["statefulsets", "namespaces", "daemonsets", "replicasets"]
+  verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $rbacResourceName }}
+  namespace: {{ .Release.Namespace }}
+subjects:
+- kind: ServiceAccount
+  name: {{ $rbacResourceName }}
+  namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: ClusterRole
+  name: {{ $rbacResourceName }}
+  apiGroup: rbac.authorization.k8s.io
+---
 # If cronjob is enabled and we must have a targetVMSS...
 {{- if .Values.kamino.auto.cronjob.enabled }}
 apiVersion: batch/v1beta1
@@ -63,6 +101,7 @@ spec:
             {{- end }}
             {{- end }}
         spec:
+          serviceAccountName: {{ $rbacResourceName }}
           restartPolicy: Never
 
           {{- if hasKey .Values.kamino.container "pullSecret" }}
@@ -146,10 +185,6 @@ spec:
                 {{- end }}
 
               env:
-                # We use the in-cluster kubeconfig
-                - name: KUBECONFIG
-                  value: /.kubeconfig
-
                 # This gets mapped here since the node has cloud local CA bundles we need
                 - name: REQUESTS_CA_BUNDLE
                   value: /etc/ssl/certs/ca-certificates.crt
@@ -178,9 +213,6 @@ spec:
                 - name: kubectl
                   mountPath: /usr/bin/kubectl
                   readOnly: true
-                - name: kubeconfig
-                  mountPath: /.kubeconfig
-                  readOnly: true
                 - name: host-crt
                   mountPath: /etc/ssl/certs/ca-certificates.crt
                   readOnly: true
@@ -195,11 +227,6 @@ spec:
             - name: kubectl
               hostPath:
                 path: /usr/local/bin/kubectl
-                type: File
-
-            - name: kubeconfig
-              hostPath:
-                path: /var/lib/kubelet/kubeconfig
                 type: File
 
             - name: host-crt
