@@ -689,6 +689,38 @@ def format_into_version(date_time):
     return date_time.strftime('%Y.%m.%d')
 
 
+def get_vmss_hyperv_generation(vmss, resource_group, subscription):
+    """
+    Given a VMSS, resource group, and subscription, this will return the
+    Hyper-v generation of that VMSS.  This is needed such that we can
+    generate the correct image definition for the VMSS.
+    This should only fail if there are no instances to check or if Azure
+    is really confused at the time.
+    :param vmss: The VMSS name
+    :param resource_group: The resource group of the VMSS
+    :param subscription: The subscription of the resource group
+    :return: The hyper-v generation - or none if we fail to get it
+    """
+    instance_id, _, rc = run(az(['vmss', 'list-instances'], subscription) + [
+                                 '--resource-group', resource_group,
+                                 '--name', vmss,
+                                 '--query', '[0].id',
+                                 '--output', 'tsv'
+                                 ], retries=3, check=False)
+
+    instance_id = instance_id.strip()
+    if rc != 0 or not instance_id:
+        return None
+
+    instance, _, rc = run(az(['vmss', 'get-instance-view']) + [
+                              '--ids', instance_id,
+                              '--query', 'hyperVGeneration',
+                              '--output', 'tsv'
+                              ], retries=3, check=False)
+
+    return instance.strip()
+
+
 def vmss_prototype_update(sub_args):
     """
     Update (create if not existing) the prototype based images for the
@@ -751,6 +783,11 @@ def vmss_prototype_update(sub_args):
                         '--gallery-image-definition', image_definition
                         ], retries=3, check=False, retry_func=not_found_no_retry)
     if rc != 0:
+        # If we have to create an image-definition, we need to know the
+        # type of hyper-v-generation that this is running with.
+        hyperv_generation = get_vmss_hyperv_generation(vmss, resource_group, subscription)
+        if not hyperv_generation:
+            fatal_error('Could not determine the hyper-v generation for vmss {0}'.format(vmss))
         output, _, _ = run(az(['sig', 'image-definition', 'create'], subscription) + [
                            '--resource-group', resource_group,
                            '--gallery-name', sig_name,
@@ -758,6 +795,7 @@ def vmss_prototype_update(sub_args):
                            '--publisher', 'VMSS-Prototype-Pattern',
                            '--offer', sub_args.resource_group,
                            '--sku', vmss,
+                           '--hyper-v-generation', hyperv_generation,
                            '--os-type', 'Linux',
                            '--os-state', 'generalized'
                            ], retries=3)

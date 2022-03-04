@@ -4,7 +4,9 @@ IMAGE_TAG=vmss-prototype:smoke-test
 
 docker build . -t ${IMAGE_TAG}
 
-docker run --rm -i -t ${IMAGE_TAG} --help
+(set -x ; docker history ${IMAGE_TAG})
+
+(set -x ; docker run --rm ${IMAGE_TAG} --help)
 
 # A form to test locally with my local azure login and kubectl from
 # my host machine by mapping in the .azure directory and the KUBECONFIG file
@@ -17,7 +19,7 @@ if [[ ! -z ${KUBECONFIG} ]] &&
    [[ -f ${KUBECONFIG} ]] &&
    [[ -d ${HOME}/.azure ]]
    then
-        docker run --rm -i -t \
+        exec docker run --rm \
             -u ${UID}:${GID} \
             --mount type=bind,source=$(which kubectl),target=/usr/bin/kubectl,readonly \
             --mount type=bind,source=${HOME}/.azure,target=${HOME}/.azure \
