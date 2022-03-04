@@ -24,9 +24,10 @@ RUN apt-get update && \
     python -m pip install \
         argparse \
         && \
+    apt-get clean && \
     rm -rf /var/lib/apt/lists/* /root/.cache
 
-# Azure CLI (Currently ~789MB all by itself!)
+# Azure CLI (Currently ~1GB all by itself!)
 RUN echo "Install AzureCLI" && \
     curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | APT_KEY_DONT_WARN_ON_DANGEROUS_USAGE=true apt-key add - && \
     echo "deb [arch=amd64] https://packages.microsoft.com/repos/azure-cli/ $(lsb_release -sc) main" > /etc/apt/sources.list.d/azure-cli.list && \
