@@ -29,7 +29,7 @@ rules:
   verbs: ["get", "list", "delete", "create"]
 - apiGroups: [""]
   resources: ["nodes"]
-  verbs: ["get", "patch"]
+  verbs: ["get", "patch", "list"]
 - apiGroups: ["apps"]
   resources: ["statefulsets", "namespaces", "daemonsets", "replicasets"]
   verbs: ["get", "list"]
