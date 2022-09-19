@@ -416,6 +416,10 @@ def image_tweaks(node_name):
             ' /var/lib/cloud/instances/*'
             ' /var/lib/waagent/history/*'
             ' /var/lib/waagent/events/*'
+            # And, clean up the journal logs as they can get
+            # lost on new VMs (old logs just build up)
+            # and journalctl vacuum will not clean them up
+            ' /var/log/journal/*'
             '',
         # This forces the machine-id to be re-issued
         '/bin/cp /dev/null /etc/machine-id',
